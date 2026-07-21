@@ -3,9 +3,6 @@ import logging
 import threading
 from typing import Optional
 
-import chromadb
-from chromadb.config import Settings as ChromaSettings
-
 from config import settings
 
 logger = logging.getLogger(__name__)
@@ -26,6 +23,14 @@ def get_vector_search() -> "VectorSearchEngine":
 
 class VectorSearchEngine:
     def __init__(self):
+        try:
+            import chromadb
+            from chromadb.config import Settings as ChromaSettings
+        except ImportError as e:
+            raise RuntimeError(
+                "chromadb is not installed. Install backend requirements or set ENABLE_VECTOR_SEARCH=false."
+            ) from e
+
         self.client = chromadb.PersistentClient(
             path=settings.chroma_persist_dir,
             settings=ChromaSettings(anonymized_telemetry=False),
