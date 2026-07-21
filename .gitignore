@@ -36,3 +36,6 @@ frontend/.env.local
 *.db
 backend/*.db
 backend/test_chroma/
+
+# Sample images (HF Spaces rejects large binaries in git)
+scripts/assets/
