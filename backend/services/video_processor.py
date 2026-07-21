@@ -15,7 +15,6 @@ from database.crud import (
 )
 from database.models import Detection, Track, Video, VideoStatus
 from detection import YOLODetector
-from search.vector_search import get_vector_search
 from tracking.deepsort_tracker import DeepSortTracker
 from tracking.simple_tracker import SimpleTracker
 from .activity_detector import ActivityDetector
@@ -34,7 +33,11 @@ def format_timestamp(seconds: float) -> str:
 class VideoProcessor:
     def __init__(self):
         self.detector = YOLODetector()
-        self.vector_search = get_vector_search() if settings.enable_vector_search else None
+        self.vector_search = None
+        if settings.enable_vector_search:
+            from search.vector_search import get_vector_search
+
+            self.vector_search = get_vector_search()
 
     def _index_events(self, video_id: int, tracks: list[dict], activities: list[dict]) -> None:
         """Index track summaries and activity events (not every frame) for search."""

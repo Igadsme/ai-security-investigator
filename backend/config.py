@@ -3,7 +3,7 @@ from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
-    database_url: str = "postgresql://postgres:postgres@localhost:5432/security_investigator"
+    database_url: str = "sqlite:///./dev.db"
     chroma_persist_dir: str = "./chroma_data"
     upload_dir: str = "../uploads"
     processed_dir: str = "../processed_videos"
@@ -25,7 +25,10 @@ class Settings(BaseSettings):
 
     @property
     def cors_origin_list(self) -> list[str]:
-        return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
+        raw = self.cors_origins.strip()
+        if raw == "*":
+            return ["*"]
+        return [o.strip() for o in raw.split(",") if o.strip()]
 
     def ensure_dirs(self) -> None:
         for d in [self.upload_dir, self.processed_dir, self.models_dir, self.chroma_persist_dir]:

@@ -1,8 +1,13 @@
 import axios from "axios";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+// Empty string = same-origin (Hugging Face Spaces / reverse proxy).
+// Use ?? so "" is preserved; only null/undefined fall back to local API.
+const API_URL =
+  process.env.NEXT_PUBLIC_API_URL !== undefined
+    ? process.env.NEXT_PUBLIC_API_URL
+    : "http://localhost:8000";
 
-const api = axios.create({ baseURL: API_URL });
+const api = axios.create({ baseURL: API_URL || undefined });
 
 api.interceptors.request.use((config) => {
   if (typeof window !== "undefined") {

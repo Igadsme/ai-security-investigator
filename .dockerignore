@@ -1,0 +1,24 @@
+# Hugging Face Spaces / Docker context
+.git
+.github
+**/__pycache__
+**/*.pyc
+**/.venv
+**/venv
+**/node_modules
+**/.next
+**/out
+**/*.db
+**/chroma_data
+**/test_chroma
+uploads/*
+!uploads/.gitkeep
+processed_videos/*
+!processed_videos/.gitkeep
+models/*.pt
+backend/.env
+frontend/.env.local
+**/.DS_Store
+docs
+*.md
+!README.md
