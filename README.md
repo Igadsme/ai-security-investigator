@@ -6,21 +6,33 @@ Upload footage, ask questions like *"Show me every person who entered the room"*
 
 ## Features
 
-- **Video Upload** — MP4, AVI, MOV, MKV support
+- **Video Upload / Batch upload** — MP4, AVI, MOV, MKV; multi-file incident ingest with camera codes
 - **YOLOv8 Detection** — Person, car, truck, dog, backpack, bicycle, motorcycle
 - **DeepSORT Tracking** — Unique object IDs (Person #1, Person #2, etc.)
-- **Natural Language Search** — Plain English queries with AI filter parsing
-- **Vector Search** — ChromaDB semantic event indexing
+- **Natural Language + Faceted Search** — NL box plus class/color/camera/confidence/time filters
+- **Similarity search** — “Find like this” across videos (cross-camera re-ID suggestions)
+- **Cases & multi-cam timeline** — Group footage under an incident; synced lanes across cameras
+- **Chain-of-custody audit log** — Timestamped actions with user attribution
+- **Evidence export** — Clip + JSON sidecar (timestamps, camera, SHA-256, detections)
+- **Redaction / blur** — Privacy blur for people/vehicles before external share
+- **Annotations, comments, roles** — Investigator notes, @mentions, viewer/investigator/admin
+- **Saved searches / standing alerts** — Proactive watches on future matches
+- **Site map** — Geo/floor-plan camera placement with detection density
+- **Retention policy** — Configurable auto-delete windows (30/90 days)
+- **Live RTSP registration** — Store stream URLs and grab snapshots for analysis
+- **False-positive flagging & confidence thresholds** — Correct the record; tune search confidence
+- **One-click case report** — Markdown/HTML handoff package
+- **Vector Search** — Optional ChromaDB semantic indexing
 - **AI Summaries** — OpenAI or Ollama powered activity reports
-- **Event Timeline** — Entry, vehicle arrival, loitering, running, abandoned objects
 - **Clip Generation** — Extract event clips on demand
-- **Authentication** — JWT-based user accounts (optional)
-- **Dashboard** — Stats, tracks, detections, peak activity
+- **Authentication** — JWT + role-based access
 
 ## Architecture
 
 ```
-Video Upload → Frame Extraction → YOLO → DeepSORT → ChromaDB → NL Search → AI Summary
+Video Upload → Frame Extraction → YOLO → DeepSORT → (optional Chroma) → NL/Faceted Search
+                                                      ↓
+                         Cases · Audit · Evidence · Re-ID · Alerts · Reports
 ```
 
 ## Tech Stack
@@ -49,44 +61,43 @@ docker compose up --build
 ### Option 2: Local Development
 
 > **Note:** Use Python 3.11 or 3.12. Python 3.14 is not yet supported by all dependencies.
+> Local/dev defaults to **SQLite** (no Postgres required). Set `DATABASE_URL` to Postgres when you want it.
 
 ```bash
 make setup          # Install backend + frontend deps
 make sample-video   # Generate test footage
 ```
 
-**1. Start PostgreSQL**
-
-```bash
-docker run -d --name pg -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=security_investigator -p 5432:5432 postgres:16-alpine
-```
-
-**2. Backend**
+**1. Backend**
 
 ```bash
 cd backend
-python -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-cp .env.example .env
+source venv/bin/activate   # created by make setup
+cp .env.example .env       # already SQLite by default
 uvicorn app:app --reload --port 8000
 ```
 
-**3. Frontend**
+**2. Frontend** (new terminal)
 
 ```bash
 cd frontend
-npm install
 npm run dev
 ```
 
-**4. Generate sample video (optional)**
+**3. Generate sample video (optional)**
 
 ```bash
-python scripts/generate_sample_video.py
+make sample-video
 ```
 
-Upload `uploads/parking_lot_sample.mp4` via the UI.
+Upload `uploads/parking_lot_sample.mp4` via the UI at http://localhost:3000.
+
+**Optional PostgreSQL**
+
+```bash
+docker run -d --name pg -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=security_investigator -p 5432:5432 postgres:16-alpine
+# then set DATABASE_URL=postgresql://postgres:postgres@localhost:5432/security_investigator in backend/.env
+```
 
 ## Environment Variables
 
@@ -100,22 +111,41 @@ Copy `backend/.env.example` to `backend/.env`:
 | `FRAME_SAMPLE_RATE` | Process every Nth frame (default: 2) |
 | `CONFIDENCE_THRESHOLD` | YOLO detection threshold (default: 0.4) |
 | `USE_DEEPSORT` | Enable DeepSORT tracking (default: false, uses lightweight tracker) |
+| `ENABLE_VECTOR_SEARCH` | Enable ChromaDB semantic indexing (default: false; SQL NL search always works) |
 
 Without OpenAI/Ollama, rule-based query parsing still works.
 
 DeepSORT is available but disabled by default to reduce memory usage. Set `USE_DEEPSORT=true` for production-grade tracking on GPU-equipped machines.
 
+ChromaDB vector search is optional (`ENABLE_VECTOR_SEARCH=true`). Leave it off for faster local processing; natural-language filters still query detections/tracks/events in SQL.
+
 ## API Endpoints
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| POST | `/api/videos/upload` | Upload video |
+| POST | `/api/videos/upload` | Upload video (optional camera_code, retention_days, case_id) |
+| POST | `/api/videos/batch-upload` | Multi-file incident ingest |
 | GET | `/api/videos/{id}/detections` | List detections |
 | GET | `/api/videos/{id}/tracks` | List tracked objects |
 | GET | `/api/videos/{id}/events` | Activity timeline |
 | POST | `/api/search` | Natural language search |
+| POST | `/api/search/faceted` | Faceted search + explainable match reasons |
 | POST | `/api/summary` | Generate AI report |
 | POST | `/api/clips/generate` | Create event clip |
+| GET | `/api/audit` | Chain-of-custody audit log |
+| POST/GET | `/api/cases` | Case folders |
+| GET | `/api/cases/{id}/timeline` | Multi-camera synced timeline |
+| POST | `/api/cases/{id}/report` | One-click investigation report |
+| POST | `/api/evidence/export` | Evidence clip + sidecar (SHA-256) |
+| POST | `/api/videos/{id}/redact` | Privacy blur export |
+| GET | `/api/tracks/{id}/similar` | Cross-video re-ID suggestions |
+| POST | `/api/annotations` | Investigator notes on tracks/times |
+| POST | `/api/comments` | Collaboration comments / mentions |
+| POST/GET | `/api/saved-searches` | Saved searches & standing alerts |
+| POST | `/api/alerts/evaluate` | Evaluate standing alerts |
+| GET/PUT | `/api/retention` | Retention policy |
+| POST | `/api/detections/{id}/false-positive` | Flag false positive |
+| GET | `/api/sites/{id}/map` | Site / camera map view |
 
 ## Example Queries
 

@@ -1,12 +1,13 @@
 import { useState } from "react";
 import { useRouter } from "next/router";
 import Link from "next/link";
-import { Camera } from "lucide-react";
 import { authApi } from "@/services/api";
+import { FieldLabel, PrimaryBtn, TextInput } from "@/components/ui-kit";
+import { ACCENT, CANVAS, GRID_BG, INK, INK2, PANEL } from "@/lib/theme";
 
 export default function LoginPage() {
   const router = useRouter();
-  const [isRegister, setIsRegister] = useState(false);
+  const [mode, setMode] = useState<"login" | "register">("login");
   const [email, setEmail] = useState("");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -18,85 +19,86 @@ export default function LoginPage() {
     setError("");
     setLoading(true);
     try {
-      if (isRegister) {
-        await authApi.register(email, username, password);
+      const user = mode === "register" ? username || email.split("@")[0] : username || email;
+      if (mode === "register") {
+        await authApi.register(email, user, password);
       }
-      const { data } = await authApi.login(username, password);
+      const { data } = await authApi.login(user, password);
       localStorage.setItem("token", data.access_token);
-      localStorage.setItem("username", username);
-      router.push("/");
+      localStorage.setItem("username", user);
+      const next = typeof router.query.next === "string" ? router.query.next : "/";
+      router.push(next.startsWith("/") ? next : "/");
     } catch {
-      setError(isRegister ? "Registration failed" : "Invalid credentials");
+      setError(mode === "register" ? "Registration failed" : "Invalid credentials");
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-4">
-      <div className="w-full max-w-md">
-        <div className="text-center mb-8">
-          <div className="w-16 h-16 rounded-xl bg-accent/20 flex items-center justify-center mx-auto mb-4">
-            <Camera className="w-8 h-8 text-accent-glow" />
-          </div>
-          <h1 className="text-2xl font-bold text-slate-100">AI Security Investigator</h1>
-          <p className="text-slate-500 mt-1">Sign in to your account</p>
+    <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: CANVAS, ...GRID_BG }}>
+      <div className="w-full max-w-[360px] px-4">
+        <div className="mb-6">
+          <span className="font-mono text-sm font-medium tracking-[0.08em]" style={{ color: INK }}>
+            [ ASCI ]
+          </span>
         </div>
 
-        <form onSubmit={submit} className="card space-y-4">
-          {isRegister && (
-            <div>
-              <label className="text-sm text-slate-400 mb-1 block">Email</label>
-              <input
-                type="email"
-                className="input-field"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                required
-              />
+        <div className="border rounded-lg overflow-hidden" style={{ backgroundColor: PANEL, borderColor: "var(--border)" }}>
+          <form onSubmit={submit} className="px-8 pt-8 pb-6">
+            <h2 className="text-xl font-semibold mb-1" style={{ color: INK }}>
+              {mode === "login" ? "Sign in" : "Create account"}
+            </h2>
+            <p className="text-sm mb-7" style={{ color: INK2 }}>
+              {mode === "login"
+                ? "Investigate footage with questions, not scrubbing."
+                : "Join your organisation's investigation workspace."}
+            </p>
+
+            <div className="flex flex-col gap-4">
+              {mode === "register" && (
+                <div>
+                  <FieldLabel>Email</FieldLabel>
+                  <TextInput type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="analyst@agency.gov" required />
+                </div>
+              )}
+              <div>
+                <FieldLabel>{mode === "register" ? "Username" : "Email / username"}</FieldLabel>
+                <TextInput
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                  placeholder={mode === "register" ? "analyst" : "analyst@agency.gov"}
+                  required
+                />
+              </div>
+              <div>
+                <FieldLabel>Password</FieldLabel>
+                <TextInput type="password" value={password} onChange={(e) => setPassword(e.target.value)} required minLength={6} />
+              </div>
+
+              {error && <p className="text-sm" style={{ color: "#A33232" }}>{error}</p>}
+
+              <PrimaryBtn type="submit" disabled={loading} className="w-full">
+                {loading ? "…" : mode === "login" ? "Sign in" : "Create account"}
+              </PrimaryBtn>
             </div>
-          )}
-          <div>
-            <label className="text-sm text-slate-400 mb-1 block">Username</label>
-            <input
-              className="input-field"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              required
-            />
-          </div>
-          <div>
-            <label className="text-sm text-slate-400 mb-1 block">Password</label>
-            <input
-              type="password"
-              className="input-field"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-              minLength={6}
-            />
-          </div>
 
-          {error && <p className="text-red-400 text-sm">{error}</p>}
-
-          <button type="submit" disabled={loading} className="btn-primary w-full">
-            {loading ? "..." : isRegister ? "Create Account" : "Sign In"}
-          </button>
-
-          <p className="text-center text-sm text-slate-500">
-            {isRegister ? "Already have an account?" : "No account?"}{" "}
-            <button
-              type="button"
-              onClick={() => setIsRegister(!isRegister)}
-              className="text-accent hover:text-accent-glow"
-            >
-              {isRegister ? "Sign in" : "Register"}
-            </button>
-          </p>
-        </form>
+            <p className="text-center text-sm mt-6" style={{ color: INK2 }}>
+              {mode === "login" ? "No account?" : "Already have an account?"}{" "}
+              <button
+                type="button"
+                className="font-medium"
+                style={{ color: ACCENT }}
+                onClick={() => setMode(mode === "login" ? "register" : "login")}
+              >
+                {mode === "login" ? "Register" : "Sign in"}
+              </button>
+            </p>
+          </form>
+        </div>
 
         <p className="text-center mt-4">
-          <Link href="/" className="text-sm text-slate-500 hover:text-slate-300">
+          <Link href="/" className="text-sm" style={{ color: INK2 }}>
             Continue without signing in
           </Link>
         </p>

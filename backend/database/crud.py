@@ -24,7 +24,11 @@ def get_user_by_username(db: Session, username: str) -> Optional[User]:
 
 
 def create_user(db: Session, email: str, username: str, hashed_password: str) -> User:
-    user = User(email=email, username=username, hashed_password=hashed_password)
+    from .models import UserRole
+
+    count = db.query(User).count()
+    role = UserRole.ADMIN if count == 0 else UserRole.INVESTIGATOR
+    user = User(email=email, username=username, hashed_password=hashed_password, role=role)
     db.add(user)
     db.commit()
     db.refresh(user)
@@ -151,8 +155,12 @@ def get_detections_for_video(
     color: Optional[str] = None,
     track_id: Optional[int] = None,
     limit: int = 500,
+    min_confidence: Optional[float] = None,
+    include_false_positives: bool = False,
 ) -> list[Detection]:
     q = db.query(Detection).filter(Detection.video_id == video_id)
+    if not include_false_positives:
+        q = q.filter(Detection.is_false_positive.is_(False))
     if object_class:
         q = q.filter(Detection.object_class == object_class)
     if start_seconds is not None:
@@ -163,6 +171,8 @@ def get_detections_for_video(
         q = q.filter(Detection.dominant_color == color)
     if track_id is not None:
         q = q.filter(Detection.track_id == track_id)
+    if min_confidence is not None:
+        q = q.filter(Detection.confidence >= min_confidence)
     return q.order_by(Detection.timestamp_seconds).limit(limit).all()
 
 
@@ -199,6 +209,7 @@ def get_detections_in_time_range(
             Detection.video_id == video_id,
             Detection.timestamp_seconds >= start_seconds,
             Detection.timestamp_seconds <= end_seconds,
+            Detection.is_false_positive.is_(False),
         )
         .order_by(Detection.timestamp_seconds)
         .all()

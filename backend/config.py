@@ -15,7 +15,8 @@ class Settings(BaseSettings):
     frame_sample_rate: int = 2
     confidence_threshold: float = 0.4
     use_deepsort: bool = False
-    cors_origins: str = "http://localhost:3000"
+    enable_vector_search: bool = False
+    cors_origins: str = "http://localhost:3000,http://localhost:3001,http://127.0.0.1:3000,http://127.0.0.1:3001"
     access_token_expire_minutes: int = 60 * 24
 
     class Config:

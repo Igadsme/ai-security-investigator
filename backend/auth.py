@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from config import settings
 from database import get_db
 from database.crud import get_user_by_username
-from database.models import User
+from database.models import User, UserRole
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login", auto_error=False)
@@ -63,3 +63,34 @@ def get_current_user(
             headers={"WWW-Authenticate": "Bearer"},
         )
     return user
+
+
+def require_roles(*roles: UserRole):
+    allowed = set(roles) | {UserRole.ADMIN}
+
+    def _resolve_role(raw) -> UserRole:
+        if isinstance(raw, UserRole):
+            return raw
+        if isinstance(raw, str):
+            # DB may store enum name ("ADMIN") or value ("admin")
+            try:
+                return UserRole[raw]
+            except KeyError:
+                pass
+            try:
+                return UserRole(raw)
+            except ValueError:
+                pass
+            try:
+                return UserRole(raw.lower())
+            except ValueError:
+                raise HTTPException(status_code=403, detail="Invalid role")
+        return UserRole.INVESTIGATOR
+
+    def _dep(user: User = Depends(get_current_user)) -> User:
+        role = _resolve_role(user.role or UserRole.INVESTIGATOR)
+        if role not in allowed:
+            raise HTTPException(status_code=403, detail="Insufficient permissions")
+        return user
+
+    return _dep

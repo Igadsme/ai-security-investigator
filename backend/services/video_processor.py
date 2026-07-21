@@ -15,7 +15,7 @@ from database.crud import (
 )
 from database.models import Detection, Track, Video, VideoStatus
 from detection import YOLODetector
-from search import VectorSearchEngine
+from search.vector_search import get_vector_search
 from tracking.deepsort_tracker import DeepSortTracker
 from tracking.simple_tracker import SimpleTracker
 from .activity_detector import ActivityDetector
@@ -34,10 +34,12 @@ def format_timestamp(seconds: float) -> str:
 class VideoProcessor:
     def __init__(self):
         self.detector = YOLODetector()
-        self.vector_search = VectorSearchEngine()
+        self.vector_search = get_vector_search() if settings.enable_vector_search else None
 
     def _index_events(self, video_id: int, tracks: list[dict], activities: list[dict]) -> None:
         """Index track summaries and activity events (not every frame) for search."""
+        if self.vector_search is None:
+            return
         import gc
 
         ids, texts, metas = [], [], []
@@ -70,9 +72,12 @@ class VideoProcessor:
                 "object_class": evt.get("object_class"),
             })
 
-        for i in range(0, len(ids), 20):
-            self.vector_search.index_batch(ids[i : i + 20], texts[i : i + 20], metas[i : i + 20])
-            gc.collect()
+        try:
+            for i in range(0, len(ids), 20):
+                self.vector_search.index_batch(ids[i : i + 20], texts[i : i + 20], metas[i : i + 20])
+                gc.collect()
+        except Exception:
+            logger.exception("Vector indexing failed for video %s; SQL results still saved", video_id)
 
     def process(self, db: Session, video: Video, job_id: int) -> None:
         from database.models import ProcessingJob
@@ -173,7 +178,10 @@ class VideoProcessor:
             ]
 
             update_processing_job(db, job, "running", 88.0, "indexing_search")
-            self._index_events(video.id, track_summaries, all_activity_raw)
+            if settings.enable_vector_search:
+                self._index_events(video.id, track_summaries, all_activity_raw)
+            else:
+                logger.info("Skipping vector indexing (ENABLE_VECTOR_SEARCH=false)")
 
             update_processing_job(db, job, "running", 95.0, "saving_results")
             bulk_create_detections(db, all_detections)

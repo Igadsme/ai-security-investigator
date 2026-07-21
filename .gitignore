@@ -32,3 +32,7 @@ backend/chroma_data/
 .env
 backend/.env
 frontend/.env.local
+
+*.db
+backend/*.db
+backend/test_chroma/

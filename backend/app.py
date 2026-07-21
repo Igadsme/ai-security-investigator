@@ -4,7 +4,7 @@ import uuid
 from pathlib import Path
 from typing import Optional
 
-from fastapi import BackgroundTasks, Depends, FastAPI, File, HTTPException, UploadFile
+from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.security import OAuth2PasswordRequestForm
@@ -52,7 +52,7 @@ from schemas import (
     UserResponse,
     VideoResponse,
 )
-from search import NaturalLanguageSearch, VectorSearchEngine
+from search import NaturalLanguageSearch
 from services import ClipGenerator, VideoProcessor
 from services.video_processor import format_timestamp
 from search.nl_search import time_str_to_seconds
@@ -75,14 +75,36 @@ app.add_middleware(
 )
 
 nl_search = NaturalLanguageSearch()
-vector_search = VectorSearchEngine()
 clip_generator = ClipGenerator()
+
+
+def _vector_search():
+    """Lazy accessor so Chroma is only opened when enabled."""
+    if not settings.enable_vector_search:
+        return None
+    from search.vector_search import get_vector_search
+
+    return get_vector_search()
 
 
 @app.on_event("startup")
 def startup():
     init_db()
     settings.ensure_dirs()
+    from services.retention import get_or_create_policy
+    from database.session import SessionLocal
+
+    db = SessionLocal()
+    try:
+        get_or_create_policy(db)
+    finally:
+        db.close()
+
+
+# Mount forensic / collaboration routes
+from routers.forensic import router as forensic_router  # noqa: E402
+
+app.include_router(forensic_router)
 
 
 def _run_processing(video_id: int, job_id: int):
@@ -128,10 +150,19 @@ def me(user: User = Depends(get_current_user)):
 @app.post("/api/videos/upload", response_model=VideoResponse)
 async def upload_video(
     background_tasks: BackgroundTasks,
+    request: Request,
     file: UploadFile = File(...),
+    camera_code: Optional[str] = Form(None),
+    retention_days: Optional[int] = Form(None),
+    case_id: Optional[int] = Form(None),
     db: Session = Depends(get_db),
     user: Optional[User] = Depends(get_current_user_optional),
 ):
+    from database.models import Camera, CaseItem
+    from services.audit import log_action
+    from services.evidence_export import sha256_file
+    from services.retention import apply_retention_on_upload
+
     if not file.filename:
         raise HTTPException(400, "No filename provided")
 
@@ -146,6 +177,7 @@ async def upload_video(
     with open(dest, "wb") as f:
         shutil.copyfileobj(file.file, f)
 
+    digest = sha256_file(dest)
     video = create_video(
         db,
         filename=unique_name,
@@ -153,10 +185,31 @@ async def upload_video(
         filepath=str(dest),
         owner_id=user.id if user else None,
     )
+    video.file_sha256 = digest
+    if camera_code:
+        video.camera_code = camera_code
+        cam = db.query(Camera).filter(Camera.camera_code == camera_code).first()
+        if cam:
+            video.camera_id = cam.id
+    db.add(video)
+    db.commit()
+    db.refresh(video)
+    apply_retention_on_upload(db, video, retention_days)
+    if case_id:
+        db.add(CaseItem(case_id=case_id, item_type="video", video_id=video.id))
+        db.commit()
 
     job = create_processing_job(db, video.id)
     background_tasks.add_task(_run_processing, video.id, job.id)
-
+    log_action(
+        db,
+        action="video.upload",
+        user=user,
+        resource_type="video",
+        resource_id=video.id,
+        details={"filename": file.filename, "sha256": digest, "camera_code": camera_code},
+        ip_address=request.client.host if request.client else None,
+    )
     return video
 
 
@@ -205,7 +258,9 @@ def reprocess_video(
     if not video:
         raise HTTPException(404, "Video not found")
 
-    vector_search.delete_video_events(video_id)
+    vs = _vector_search()
+    if vs is not None:
+        vs.delete_video_events(video_id)
     job = create_processing_job(db, video_id)
     background_tasks.add_task(_run_processing, video_id, job.id)
     return job
@@ -242,6 +297,7 @@ def list_detections(
             track_id=d.track_id,
             dominant_color=d.dominant_color,
             bbox={"x1": d.bbox_x1, "y1": d.bbox_y1, "x2": d.bbox_x2, "y2": d.bbox_y2},
+            is_false_positive=bool(d.is_false_positive),
         )
         for d in dets
     ]
@@ -266,6 +322,7 @@ def list_tracks(video_id: int, db: Session = Depends(get_db)):
             frame_count=t.frame_count,
             dominant_color=t.dominant_color,
             is_unique_person=t.is_unique_person,
+            global_identity=t.global_identity,
         )
         for t in tracks
     ]
@@ -301,7 +358,12 @@ def video_stats(video_id: int, db: Session = Depends(get_db)):
     if not video:
         raise HTTPException(404, "Video not found")
 
-    total = db.query(func.count(Detection.id)).filter(Detection.video_id == video_id).scalar() or 0
+    total = (
+        db.query(func.count(Detection.id))
+        .filter(Detection.video_id == video_id, Detection.is_false_positive.is_(False))
+        .scalar()
+        or 0
+    )
     unique_tracks = get_unique_track_counts(db, video_id)
     unique_people = db.query(func.count(Track.id)).filter(
         Track.video_id == video_id, Track.object_class == "person"
@@ -310,7 +372,7 @@ def video_stats(video_id: int, db: Session = Depends(get_db)):
 
     peak_row = (
         db.query(Detection.timestamp_seconds, func.count(Detection.id).label("cnt"))
-        .filter(Detection.video_id == video_id)
+        .filter(Detection.video_id == video_id, Detection.is_false_positive.is_(False))
         .group_by(Detection.frame_number, Detection.timestamp_seconds)
         .order_by(func.count(Detection.id).desc())
         .first()
@@ -400,7 +462,8 @@ def search(req: SearchRequest, db: Session = Depends(get_db)):
             unique_count = q.count()
 
     semantic_q = filters.get("semantic_query", req.query)
-    vector_hits = vector_search.search(semantic_q, video_id=req.video_id, n_results=15)
+    vs = _vector_search()
+    vector_hits = vs.search(semantic_q, video_id=req.video_id, n_results=15) if vs else []
     for hit in vector_hits:
         meta = hit.get("metadata", {})
         ts = float(meta.get("timestamp_seconds", 0))

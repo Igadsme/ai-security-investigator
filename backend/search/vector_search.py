@@ -1,10 +1,27 @@
 import json
+import logging
+import threading
 from typing import Optional
 
 import chromadb
 from chromadb.config import Settings as ChromaSettings
 
 from config import settings
+
+logger = logging.getLogger(__name__)
+
+_engine: Optional["VectorSearchEngine"] = None
+_engine_lock = threading.Lock()
+
+
+def get_vector_search() -> "VectorSearchEngine":
+    """Process-wide singleton — Chroma PersistentClient is not multi-instance safe."""
+    global _engine
+    if _engine is None:
+        with _engine_lock:
+            if _engine is None:
+                _engine = VectorSearchEngine()
+    return _engine
 
 
 class VectorSearchEngine:
@@ -17,6 +34,7 @@ class VectorSearchEngine:
             name="surveillance_events",
             metadata={"hnsw:space": "cosine"},
         )
+        self._write_lock = threading.Lock()
 
     def index_event(
         self,
@@ -24,11 +42,12 @@ class VectorSearchEngine:
         text: str,
         metadata: dict,
     ) -> None:
-        self.collection.upsert(
-            ids=[event_id],
-            documents=[text],
-            metadatas=[{k: _serialize(v) for k, v in metadata.items()}],
-        )
+        with self._write_lock:
+            self.collection.upsert(
+                ids=[event_id],
+                documents=[text],
+                metadatas=[{k: _serialize(v) for k, v in metadata.items()}],
+            )
 
     def index_batch(
         self,
@@ -39,7 +58,8 @@ class VectorSearchEngine:
         if not ids:
             return
         serialized = [{k: _serialize(v) for k, v in m.items()} for m in metadatas]
-        self.collection.upsert(ids=ids, documents=texts, metadatas=serialized)
+        with self._write_lock:
+            self.collection.upsert(ids=ids, documents=texts, metadatas=serialized)
 
     def search(
         self,
@@ -48,11 +68,12 @@ class VectorSearchEngine:
         n_results: int = 20,
     ) -> list[dict]:
         where = {"video_id": str(video_id)} if video_id else None
-        results = self.collection.query(
-            query_texts=[query],
-            n_results=n_results,
-            where=where,
-        )
+        with self._write_lock:
+            results = self.collection.query(
+                query_texts=[query],
+                n_results=n_results,
+                where=where,
+            )
 
         hits = []
         if not results["ids"] or not results["ids"][0]:
@@ -70,12 +91,15 @@ class VectorSearchEngine:
 
     def delete_video_events(self, video_id: int) -> None:
         try:
-            self.collection.delete(where={"video_id": str(video_id)})
+            with self._write_lock:
+                self.collection.delete(where={"video_id": str(video_id)})
         except Exception:
             pass
 
 
 def _serialize(value) -> str:
+    if value is None:
+        return ""
     if isinstance(value, (dict, list)):
         return json.dumps(value)
     return str(value)

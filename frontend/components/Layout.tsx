@@ -1,20 +1,51 @@
 import Link from "next/link";
 import { useRouter } from "next/router";
 import { ReactNode, useEffect, useState } from "react";
-import { Camera, LogOut, Search, Upload, LayoutDashboard } from "lucide-react";
-import clsx from "clsx";
+import {
+  Bell,
+  Briefcase,
+  LayoutDashboard,
+  LogOut,
+  Map,
+  ScrollText,
+  Search,
+  Settings,
+  Upload,
+} from "lucide-react";
+import { videoApi, Video } from "@/services/api";
+import { ACCENT, ACCENT_SOFT, INK, INK2, PANEL, mapStatus } from "@/lib/theme";
 
 interface LayoutProps {
   children: ReactNode;
+  hideChrome?: boolean;
 }
 
-export default function Layout({ children }: LayoutProps) {
+export default function Layout({ children, hideChrome }: LayoutProps) {
   const router = useRouter();
-  const [username, setUsername] = useState<string | null>(null);
+  const [processingCount, setProcessingCount] = useState(0);
 
   useEffect(() => {
-    setUsername(localStorage.getItem("username"));
-  }, []);
+    let cancelled = false;
+    const load = () => {
+      videoApi
+        .list()
+        .then(({ data }) => {
+          if (cancelled) return;
+          const n = data.filter((v: Video) => {
+            const s = mapStatus(v.status);
+            return s === "processing" || s === "queued";
+          }).length;
+          setProcessingCount(n);
+        })
+        .catch(() => {});
+    };
+    load();
+    const t = setInterval(load, 5000);
+    return () => {
+      cancelled = true;
+      clearInterval(t);
+    };
+  }, [router.pathname]);
 
   const logout = () => {
     localStorage.removeItem("token");
@@ -22,64 +53,97 @@ export default function Layout({ children }: LayoutProps) {
     router.push("/login");
   };
 
+  if (hideChrome) {
+    return <>{children}</>;
+  }
+
   const nav = [
     { href: "/", label: "Dashboard", icon: LayoutDashboard },
+    { href: "/cases", label: "Cases", icon: Briefcase },
     { href: "/upload", label: "Upload", icon: Upload },
     { href: "/search", label: "Search", icon: Search },
+    { href: "/map", label: "Site map", icon: Map },
+    { href: "/alerts", label: "Alerts", icon: Bell },
+    { href: "/audit", label: "Audit log", icon: ScrollText },
+    { href: "/settings", label: "Settings", icon: Settings },
   ];
 
   return (
-    <div className="min-h-screen flex">
-      <aside className="w-64 bg-surface-800 border-r border-surface-600 flex flex-col">
-        <div className="p-6 border-b border-surface-600">
-          <Link href="/" className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-lg bg-accent/20 flex items-center justify-center">
-              <Camera className="w-5 h-5 text-accent-glow" />
-            </div>
-            <div>
-              <h1 className="font-semibold text-sm leading-tight">AI Security</h1>
-              <p className="text-xs text-slate-500">Investigator</p>
-            </div>
+    <div className="min-h-screen flex" style={{ backgroundColor: "var(--background)" }}>
+      <aside
+        className="w-60 flex-shrink-0 flex flex-col border-r h-screen sticky top-0"
+        style={{ backgroundColor: PANEL, borderColor: "var(--border)" }}
+      >
+        <div className="px-5 py-[18px] border-b" style={{ borderColor: "var(--border)" }}>
+          <Link href="/" className="font-mono text-sm font-medium tracking-[0.08em]" style={{ color: INK }}>
+            [ ASCI ]
           </Link>
         </div>
 
-        <nav className="flex-1 p-4 space-y-1">
-          {nav.map(({ href, label, icon: Icon }) => (
-            <Link
-              key={href}
-              href={href}
-              className={clsx(
-                "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors",
-                router.pathname === href
-                  ? "bg-accent/15 text-accent-glow"
-                  : "text-slate-400 hover:text-slate-200 hover:bg-surface-700"
-              )}
-            >
-              <Icon className="w-4 h-4" />
-              {label}
-            </Link>
-          ))}
+        <nav className="flex-1 px-3 py-4 flex flex-col gap-0.5 overflow-y-auto">
+          {nav.map(({ href, label, icon: Icon }) => {
+            const active =
+              router.pathname === href ||
+              (href === "/" && router.pathname.startsWith("/video")) ||
+              (href === "/cases" && router.pathname.startsWith("/cases"));
+            return (
+              <Link
+                key={href}
+                href={href}
+                className="w-full flex items-center gap-3 px-3 py-2.5 rounded-md text-sm font-medium transition-colors"
+                style={
+                  active
+                    ? { backgroundColor: ACCENT, color: "#FAFBFA" }
+                    : { color: INK }
+                }
+                onMouseEnter={(e) => {
+                  if (!active) (e.currentTarget as HTMLElement).style.backgroundColor = ACCENT_SOFT;
+                }}
+                onMouseLeave={(e) => {
+                  if (!active) (e.currentTarget as HTMLElement).style.backgroundColor = "";
+                }}
+              >
+                <Icon size={15} />
+                {label}
+              </Link>
+            );
+          })}
         </nav>
 
-        <div className="p-4 border-t border-surface-600">
-          {username ? (
-            <div className="flex items-center justify-between">
-              <span className="text-sm text-slate-400 truncate">{username}</span>
-              <button onClick={logout} className="text-slate-500 hover:text-slate-300">
-                <LogOut className="w-4 h-4" />
-              </button>
+        {processingCount > 0 && (
+          <div
+            className="mx-3 mb-2 px-3 py-2.5 rounded-md border"
+            style={{ backgroundColor: "#F6EAD2", borderColor: "var(--border)" }}
+          >
+            <div className="flex items-center gap-2">
+              <div className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ backgroundColor: "#9C6B12" }} />
+              <span className="text-xs" style={{ color: "#9C6B12" }}>
+                {processingCount} job{processingCount > 1 ? "s" : ""} processing
+              </span>
             </div>
-          ) : (
-            <Link href="/login" className="text-sm text-accent hover:text-accent-glow">
-              Sign in
-            </Link>
-          )}
+          </div>
+        )}
+
+        <div className="px-3 py-4 border-t" style={{ borderColor: "var(--border)" }}>
+          <button
+            type="button"
+            onClick={logout}
+            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-md text-sm text-left transition-colors"
+            style={{ color: INK2 }}
+            onMouseEnter={(e) => {
+              (e.currentTarget as HTMLElement).style.backgroundColor = ACCENT_SOFT;
+            }}
+            onMouseLeave={(e) => {
+              (e.currentTarget as HTMLElement).style.backgroundColor = "";
+            }}
+          >
+            <LogOut size={15} />
+            Sign out
+          </button>
         </div>
       </aside>
 
-      <main className="flex-1 overflow-auto">
-        <div className="p-8 max-w-7xl mx-auto">{children}</div>
-      </main>
+      <main className="flex-1 overflow-auto min-w-0">{children}</main>
     </div>
   );
 }

@@ -20,7 +20,7 @@ export default function VideoUploader({ onUploaded }: Props) {
     setError("");
     setUploading(true);
     try {
-      const { data } = await videoApi.upload(file, setProgress);
+      const { data } = await videoApi.upload(file, { onProgress: setProgress });
       onUploaded(data.id);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Upload failed");
