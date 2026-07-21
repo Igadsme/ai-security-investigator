@@ -1,0 +1,34 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.env
+
+# Node
+node_modules/
+.next/
+out/
+
+# Data
+uploads/*
+!uploads/.gitkeep
+processed_videos/*
+!processed_videos/.gitkeep
+models/*.pt
+chroma_data/
+backend/chroma_data/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+.DS_Store
+
+# Logs
+*.log
+
+.env
+backend/.env
+frontend/.env.local

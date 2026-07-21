@@ -1,0 +1,55 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: security_investigator
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/security_investigator
+      UPLOAD_DIR: /app/uploads
+      PROCESSED_DIR: /app/processed_videos
+      MODELS_DIR: /app/models
+      CHROMA_PERSIST_DIR: /app/chroma_data
+      CORS_ORIGINS: http://localhost:3000
+      SECRET_KEY: dev-secret-change-in-production
+      FRAME_SAMPLE_RATE: 5
+    volumes:
+      - ./uploads:/app/uploads
+      - ./processed_videos:/app/processed_videos
+      - ./models:/app/models
+      - chroma_data:/app/chroma_data
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8000
+    depends_on:
+      - backend
+
+volumes:
+  postgres_data:
+  chroma_data:
