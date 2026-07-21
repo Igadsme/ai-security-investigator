@@ -231,6 +231,3 @@ PYTHONPATH=. ./venv/bin/python scripts/smoke_forensic.py
 
 Face recognition is not included. Use surveillance analysis only where legally permitted.
 
-## License
-
-MIT
