@@ -6,14 +6,12 @@ colorTo: gray
 sdk: docker
 app_port: 7860
 pinned: false
-license: mit
 ---
 
 # AI Security Camera Investigator
 
 An AI-powered surveillance video investigation platform that combines computer vision, object tracking, vector search, and natural language querying.
-
-Upload footage, ask questions like *"Show me every person who entered the room"* or *"When did the white car appear?"*, and get timestamps, clips, and AI-generated summaries.
+Upload footage and ask questions like *"Show me every person who entered the room"* or *"When did the white car appear?"**, and get timestamps, clips, and AI-generated summaries.
 
 ## Features
 
