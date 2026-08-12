@@ -223,11 +223,5 @@ pytest tests/ -v
 PYTHONPATH=. ./venv/bin/python scripts/smoke_forensic.py
 ```
 
-## Resume Bullet
-
-> Developed an AI-powered video investigation platform using YOLO, OpenCV, FastAPI, and vector search, enabling natural-language querying of surveillance footage and automated event detection across thousands of video frames.
-
-## Privacy
-
-Face recognition is not included. Use surveillance analysis only where legally permitted.
+## Face recognition is not included. Use surveillance analysis only where legally permitted.
 
