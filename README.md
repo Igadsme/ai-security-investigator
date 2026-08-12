@@ -188,32 +188,6 @@ ai-security-investigator/
 ├── models/
 └── docs/
 ```
-
-## Deploy on Hugging Face Spaces
-
-This repo is Docker-Space ready (`sdk: docker`, port **7860**).
-
-1. Create a Space → **Docker** SDK → link this GitHub repo  
-2. Spaces builds the root `Dockerfile` (API + UI behind nginx)  
-3. Set secrets in Space **Settings → Variables**:
-   - `SECRET_KEY` — required in production  
-   - `OPENAI_API_KEY` — optional  
-   - `ENABLE_VECTOR_SEARCH=false` (default)  
-4. Open `https://<user>-<space>.hf.space` → Register → upload a short MP4  
-
-Notes:
-- Uses **SQLite** on `/data` (no Postgres required)  
-- UI and API share one origin (`/api` proxied)  
-- Free CPU may OOM on long videos — use short clips or upgrade hardware  
-- First build downloads YOLO weights and can take a long time  
-
-Local Space-like run (optional):
-
-```bash
-docker build -t asci-spaces.
-docker run --rm -p 7860:7860 -e SECRET_KEY=dev asci-spaces
-```
-
 ## Testing
 
 ```bash
