@@ -25,7 +25,7 @@ Upload footage, ask questions like *"Show me every person who entered the room"*
 - **Cases & multi-cam timeline** — Group footage under an incident; synced lanes across cameras
 - **Chain-of-custody audit log** — Timestamped actions with user attribution
 - **Evidence export** — Clip + JSON sidecar (timestamps, camera, SHA-256, detections)
-- **Redaction / blur** — Privacy blur for people/vehicles before external share
+- **Redaction/blur** — Privacy blur for people/vehicles before external share
 - **Annotations, comments, roles** — Investigator notes, @mentions, viewer/investigator/admin
 - **Saved searches / standing alerts** — Proactive watches on future matches
 - **Site map** — Geo/floor-plan camera placement with detection density
@@ -34,7 +34,7 @@ Upload footage, ask questions like *"Show me every person who entered the room"*
 - **False-positive flagging & confidence thresholds** — Correct the record; tune search confidence
 - **One-click case report** — Markdown/HTML handoff package
 - **Vector Search** — Optional ChromaDB semantic indexing
-- **AI Summaries** — OpenAI or Ollama powered activity reports
+- **AI Summaries** — OpenAI or Ollama-powered activity reports
 - **Clip Generation** — Extract event clips on demand
 - **Authentication** — JWT + role-based access
 
@@ -210,7 +210,7 @@ Notes:
 Local Space-like run (optional):
 
 ```bash
-docker build -t asci-spaces .
+docker build -t asci-spaces.
 docker run --rm -p 7860:7860 -e SECRET_KEY=dev asci-spaces
 ```
 
