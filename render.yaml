@@ -1,0 +1,38 @@
+# Render Blueprint — https://dashboard.render.com/blueprints
+# YOLO + Next.js need more than 512MB RAM. Standard (2GB) is the minimum.
+services:
+  - type: web
+    name: ai-security-investigator
+    runtime: docker
+    plan: standard
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /api/health
+    envVars:
+      - key: SECRET_KEY
+        generateValue: true
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GEMINI_MODEL
+        value: gemini-2.5-flash
+      - key: ENABLE_VECTOR_SEARCH
+        value: "false"
+      - key: USE_DEEPSORT
+        value: "false"
+      - key: FRAME_SAMPLE_RATE
+        value: "5"
+      - key: CORS_ORIGINS
+        value: "*"
+      - key: DATABASE_URL
+        value: sqlite:////data/app.db
+      - key: UPLOAD_DIR
+        value: /data/uploads
+      - key: PROCESSED_DIR
+        value: /data/processed_videos
+      - key: MODELS_DIR
+        value: /data/models
+      - key: CHROMA_PERSIST_DIR
+        value: /data/chroma_data
+    disk:
+      name: asci-data
+      mountPath: /data
+      sizeGB: 10

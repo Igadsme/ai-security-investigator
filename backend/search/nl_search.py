@@ -3,9 +3,10 @@ import re
 from typing import Optional
 
 import httpx
-from openai import OpenAI
 
 from config import settings
+
+GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 
 OBJECT_ALIASES = {
     "people": "person",
@@ -75,25 +76,9 @@ Example: {{"object_class": "car", "color": "white", "semantic_query": "white car
 """
 
         try:
-            if settings.openai_api_key:
-                client = OpenAI(api_key=settings.openai_api_key)
-                resp = client.chat.completions.create(
-                    model="gpt-4o-mini",
-                    messages=[{"role": "user", "content": prompt}],
-                    temperature=0,
-                    max_tokens=300,
-                )
-                content = resp.choices[0].message.content or ""
-            elif settings.use_ollama:
-                with httpx.Client(timeout=30) as http:
-                    resp = http.post(
-                        f"{settings.ollama_base_url}/api/generate",
-                        json={"model": "llama3.2", "prompt": prompt, "stream": False},
-                    )
-                    content = resp.json().get("response", "")
-            else:
+            content = _complete(prompt, temperature=0, max_tokens=300, timeout=30)
+            if not content:
                 return None
-
             match = re.search(r"\{.*\}", content, re.DOTALL)
             if match:
                 return json.loads(match.group())
@@ -157,26 +142,58 @@ Format:
 - Keep under 200 words"""
 
         try:
-            if settings.openai_api_key:
-                client = OpenAI(api_key=settings.openai_api_key)
-                resp = client.chat.completions.create(
-                    model="gpt-4o-mini",
-                    messages=[{"role": "user", "content": prompt}],
-                    temperature=0.3,
-                    max_tokens=400,
-                )
-                return resp.choices[0].message.content or _fallback_summary(stats, events)
-            elif settings.use_ollama:
-                with httpx.Client(timeout=60) as http:
-                    resp = http.post(
-                        f"{settings.ollama_base_url}/api/generate",
-                        json={"model": "llama3.2", "prompt": prompt, "stream": False},
-                    )
-                    return resp.json().get("response", "") or _fallback_summary(stats, events)
+            content = _complete(prompt, temperature=0.3, max_tokens=400, timeout=60)
+            if content:
+                return content
         except Exception:
             pass
 
         return _fallback_summary(stats, events)
+
+
+def _complete(prompt: str, temperature: float, max_tokens: int, timeout: float) -> Optional[str]:
+    if settings.gemini_api_key:
+        return _complete_gemini(prompt, temperature, max_tokens, timeout)
+    if settings.use_ollama:
+        return _complete_ollama(prompt, timeout)
+    return None
+
+
+def _complete_gemini(prompt: str, temperature: float, max_tokens: int, timeout: float) -> Optional[str]:
+    url = GEMINI_API_URL.format(model=settings.gemini_model)
+    headers = {
+        "Content-Type": "application/json",
+        "x-goog-api-key": settings.gemini_api_key,
+    }
+    payload = {
+        "contents": [{"parts": [{"text": prompt}]}],
+        "generationConfig": {
+            "temperature": temperature,
+            "maxOutputTokens": max_tokens,
+            "thinkingConfig": {"thinkingBudget": 0},
+        },
+    }
+    with httpx.Client(timeout=timeout) as http:
+        resp = http.post(url, headers=headers, json=payload)
+        if resp.status_code >= 400 and "thinkingConfig" in payload["generationConfig"]:
+            payload["generationConfig"].pop("thinkingConfig")
+            resp = http.post(url, headers=headers, json=payload)
+        resp.raise_for_status()
+        data = resp.json()
+
+    parts = ((data.get("candidates") or [{}])[0].get("content") or {}).get("parts") or []
+    texts = [p["text"] for p in parts if p.get("text") and not p.get("thought")]
+    return "".join(texts).strip() or None
+
+
+def _complete_ollama(prompt: str, timeout: float) -> Optional[str]:
+    with httpx.Client(timeout=timeout) as http:
+        resp = http.post(
+            f"{settings.ollama_base_url}/api/generate",
+            json={"model": "llama3.2", "prompt": prompt, "stream": False},
+        )
+        resp.raise_for_status()
+        return (resp.json().get("response") or "").strip() or None
 
 
 def _extract_time_range(query: str) -> Optional[dict]:

@@ -12,7 +12,6 @@ bcrypt==4.2.1
 ultralytics==8.3.49
 opencv-python-headless==4.10.0.84
 numpy==1.26.4
-openai==1.57.4
 httpx==0.28.1
 aiofiles==24.1.0
 Pillow==11.0.0

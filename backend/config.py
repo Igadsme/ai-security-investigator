@@ -9,7 +9,8 @@ class Settings(BaseSettings):
     processed_dir: str = "../processed_videos"
     models_dir: str = "../models"
     secret_key: str = "dev-secret-key-change-in-production"
-    openai_api_key: str = ""
+    gemini_api_key: str = ""
+    gemini_model: str = "gemini-2.5-flash"
     ollama_base_url: str = "http://localhost:11434"
     use_ollama: bool = False
     frame_sample_rate: int = 2

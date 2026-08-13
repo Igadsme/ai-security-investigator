@@ -15,7 +15,7 @@ Video Upload → Frame Extraction → YOLO Detection → DeepSORT Tracking
 | Tracking | DeepSORT | Unique object IDs across frames |
 | Vector DB | ChromaDB | Semantic search over events |
 | Metadata DB | PostgreSQL | Videos, detections, tracks, events |
-| NL Layer | OpenAI / Ollama / Rules | Query parsing and summaries |
+| NL Layer | Gemini / Ollama / Rules | Query parsing and summaries |
 | API | FastAPI | REST endpoints |
 | Frontend | Next.js + Tailwind | Upload, search, timeline, clips |
 

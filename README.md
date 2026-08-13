@@ -1,13 +1,3 @@
----
-title: AI Security Camera Investigator
-emoji: 📹
-colorFrom: green
-colorTo: gray
-sdk: docker
-app_port: 7860
-pinned: false
----
-
 # AI Security Camera Investigator
 
 An AI-powered surveillance video investigation platform that combines computer vision, object tracking, vector search, and natural language querying.
@@ -32,7 +22,7 @@ Upload footage and ask questions like *"Show me every person who entered the roo
 - **False-positive flagging & confidence thresholds** — Correct the record; tune search confidence
 - **One-click case report** — Markdown/HTML handoff package
 - **Vector Search** — Optional ChromaDB semantic indexing
-- **AI Summaries** — OpenAI or Ollama-powered activity reports
+- **AI Summaries** — Gemini or Ollama powered activity reports
 - **Clip Generation** — Extract event clips on demand
 - **Authentication** — JWT + role-based access
 
@@ -52,7 +42,7 @@ Video Upload → Frame Extraction → YOLO → DeepSORT → (optional Chroma) �
 | Backend | FastAPI, SQLAlchemy |
 | Database | PostgreSQL |
 | Vector DB | ChromaDB |
-| AI | OpenAI API / Ollama (optional) |
+| AI | Gemini API / Ollama (optional) |
 | Frontend | Next.js 14, Tailwind CSS |
 
 ## Quick Start
@@ -115,14 +105,15 @@ Copy `backend/.env.example` to `backend/.env`:
 | Variable | Description |
 |----------|-------------|
 | `DATABASE_URL` | PostgreSQL connection string |
-| `OPENAI_API_KEY` | Enables GPT-powered search parsing & summaries |
+| `GEMINI_API_KEY` | Enables Gemini-powered search parsing & summaries |
+| `GEMINI_MODEL` | Gemini model id (default: `gemini-2.5-flash`) |
 | `USE_OLLAMA` | Set `true` to use local Ollama instead |
 | `FRAME_SAMPLE_RATE` | Process every Nth frame (default: 2) |
 | `CONFIDENCE_THRESHOLD` | YOLO detection threshold (default: 0.4) |
 | `USE_DEEPSORT` | Enable DeepSORT tracking (default: false, uses lightweight tracker) |
 | `ENABLE_VECTOR_SEARCH` | Enable ChromaDB semantic indexing (default: false; SQL NL search always works) |
 
-Without OpenAI/Ollama, rule-based query parsing still works.
+Without Gemini/Ollama, rule-based query parsing still works.
 
 DeepSORT is available but disabled by default to reduce memory usage. Set `USE_DEEPSORT=true` for production-grade tracking on GPU-equipped machines.
 
@@ -186,6 +177,43 @@ ai-security-investigator/
 ├── models/
 └── docs/
 ```
+
+## Deploy on Render
+
+Production runs as **one Docker web service**: FastAPI + Next.js behind nginx, SQLite and uploads on a persistent disk at `/data`.
+
+1. Push this repo to GitHub (already connected at [Igadsme/ai-security-investigator](https://github.com/Igadsme/ai-security-investigator)).
+2. In [Render](https://dashboard.render.com) → **New** → **Blueprint** → select the repo. Render reads `render.yaml`.
+3. Confirm the **Standard** plan (2 GB). YOLO will OOM on Starter/Free (512 MB).
+4. Set `GEMINI_API_KEY` if you want Gemini search/summaries (optional; leave blank for rule-based parsing).
+5. Deploy. First build downloads Node, Python deps, and can take 10–20 minutes. Open `https://ai-security-investigator.onrender.com` (or the URL Render assigns) → Register → upload a short MP4.
+
+Manual setup (same result, no Blueprint):
+
+1. **New Web Service** → connect the GitHub repo → **Docker**
+2. Dockerfile path: `./Dockerfile`
+3. Health check path: `/api/health`
+4. Attach a **10 GB disk** mounted at `/data`
+5. Instance type: **Standard** or larger
+6. Set `SECRET_KEY` to a long random string (Blueprint generates this automatically)
+
+Notes:
+
+- UI and API share one origin (`/api` is proxied)
+- Data lives on the disk (`app.db`, uploads, YOLO weights). Deploys without a disk wipe footage.
+- First video process downloads YOLO weights into `/data/models`
+- Use short clips on Standard; bump to Pro (4 GB) if processing OOMs
+- After Render is live, pause or delete the Hugging Face Space so it no longer auto-deploys from GitHub
+
+Local production-like run:
+
+```bash
+docker build -t asci .
+docker run --rm -p 10000:10000 -e SECRET_KEY=dev asci
+```
+
+Then open http://localhost:10000.
+
 ## Testing
 
 ```bash
@@ -195,5 +223,7 @@ pytest tests/ -v
 PYTHONPATH=. ./venv/bin/python scripts/smoke_forensic.py
 ```
 
-## Face recognition is not included. Use surveillance analysis only where legally permitted.
+## Privacy
+
+Face recognition is not included. Use surveillance analysis only where legally permitted.
 

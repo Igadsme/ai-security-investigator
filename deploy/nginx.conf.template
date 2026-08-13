@@ -22,7 +22,7 @@ http {
     }
 
     server {
-        listen 7860;
+        listen LISTEN_PORT;
         server_name _;
 
         location /api/ {

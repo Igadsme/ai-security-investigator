@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+PORT="${PORT:-10000}"
+
 mkdir -p /data/uploads /data/processed_videos /data/models /data/chroma_data /var/log/nginx
 
 export DATABASE_URL="${DATABASE_URL:-sqlite:////data/app.db}"
@@ -12,14 +14,14 @@ export ENABLE_VECTOR_SEARCH="${ENABLE_VECTOR_SEARCH:-false}"
 export USE_DEEPSORT="${USE_DEEPSORT:-false}"
 export FRAME_SAMPLE_RATE="${FRAME_SAMPLE_RATE:-5}"
 export CORS_ORIGINS="${CORS_ORIGINS:-*}"
-export SECRET_KEY="${SECRET_KEY:-hf-spaces-dev-secret-change-me}"
+export SECRET_KEY="${SECRET_KEY:-change-me}"
 
-echo "[spaces] starting API on :8000"
+echo "[asci] starting API on :8000"
 cd /app/backend
 uvicorn app:app --host 127.0.0.1 --port 8000 --workers 1 &
 API_PID=$!
 
-echo "[spaces] starting UI on :3000"
+echo "[asci] starting UI on :3000"
 cd /app/frontend
 npx next start -H 127.0.0.1 -p 3000 &
 WEB_PID=$!
@@ -29,13 +31,14 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# Wait for API health before nginx
-for i in $(seq 1 60); do
-  if curl -sf http://127.0.0.1:8000/docs >/dev/null; then
+for i in $(seq 1 90); do
+  if curl -sf http://127.0.0.1:8000/api/health >/dev/null; then
     break
   fi
   sleep 1
 done
 
-echo "[spaces] starting nginx on :7860"
-nginx -c /app/deploy/nginx.spaces.conf -g 'daemon off;'
+sed "s/LISTEN_PORT/${PORT}/g" /app/deploy/nginx.conf.template > /tmp/nginx.conf
+
+echo "[asci] starting nginx on :${PORT}"
+nginx -c /tmp/nginx.conf -g 'daemon off;'
