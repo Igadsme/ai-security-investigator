@@ -15,6 +15,9 @@ export USE_DEEPSORT="${USE_DEEPSORT:-false}"
 export FRAME_SAMPLE_RATE="${FRAME_SAMPLE_RATE:-5}"
 export CORS_ORIGINS="${CORS_ORIGINS:-*}"
 export SECRET_KEY="${SECRET_KEY:-change-me}"
+export GEMINI_API_KEY="${GEMINI_API_KEY:-}"
+export GEMINI_MODEL="${GEMINI_MODEL:-gemini-2.5-flash}"
+export YOLO_CONFIG_DIR="${YOLO_CONFIG_DIR:-/data/models}"
 
 echo "[asci] starting API on :8000"
 cd /app/backend
@@ -31,8 +34,21 @@ cleanup() {
 }
 trap cleanup EXIT
 
+api_ok=0
 for i in $(seq 1 90); do
   if curl -sf http://127.0.0.1:8000/api/health >/dev/null; then
+    api_ok=1
+    break
+  fi
+  sleep 1
+done
+if [ "$api_ok" != "1" ]; then
+  echo "[asci] API failed to become healthy"
+  exit 1
+fi
+
+for i in $(seq 1 60); do
+  if curl -sf http://127.0.0.1:3000 >/dev/null; then
     break
   fi
   sleep 1

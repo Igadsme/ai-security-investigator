@@ -14,8 +14,6 @@ from database.crud import (
     update_video_status,
 )
 from database.models import Detection, Track, Video, VideoStatus
-from detection import YOLODetector
-from tracking.deepsort_tracker import DeepSortTracker
 from tracking.simple_tracker import SimpleTracker
 from .activity_detector import ActivityDetector
 from .clip_generator import ClipGenerator
@@ -32,7 +30,9 @@ def format_timestamp(seconds: float) -> str:
 
 class VideoProcessor:
     def __init__(self):
-        self.detector = YOLODetector()
+        from detection.yolo_detector import get_detector
+
+        self.detector = get_detector()
         self.vector_search = None
         if settings.enable_vector_search:
             from search.vector_search import get_vector_search
@@ -94,6 +94,8 @@ class VideoProcessor:
             update_video_status(db, video, VideoStatus.PROCESSING)
             update_processing_job(db, job, "running", 0.0, "extracting_metadata")
 
+            from detection.yolo_detector import YOLODetector
+
             info = YOLODetector.get_video_info(video.filepath)
             update_video_metadata(
                 db, video,
@@ -107,7 +109,12 @@ class VideoProcessor:
             cap = cv2.VideoCapture(video.filepath)
             fps = info["fps"]
             sample_rate = settings.frame_sample_rate
-            tracker = DeepSortTracker() if settings.use_deepsort else SimpleTracker()
+            if settings.use_deepsort:
+                from tracking.deepsort_tracker import DeepSortTracker
+
+                tracker = DeepSortTracker()
+            else:
+                tracker = SimpleTracker()
             activity = ActivityDetector(info["width"], info["height"])
 
             all_detections: list[Detection] = []

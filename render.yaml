@@ -1,5 +1,5 @@
 # Render Blueprint — https://dashboard.render.com/blueprints
-# YOLO + Next.js need more than 512MB RAM. Standard (2GB) is the minimum.
+# YOLO + Next.js need RAM. Standard (2GB) is the minimum; bump to pro if processing OOMs.
 services:
   - type: web
     name: ai-security-investigator

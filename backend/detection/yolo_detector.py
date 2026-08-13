@@ -3,7 +3,6 @@ from typing import Optional
 
 import cv2
 import numpy as np
-from ultralytics import YOLO
 
 from config import settings
 
@@ -67,8 +66,22 @@ def get_dominant_color(frame: np.ndarray, bbox: tuple[float, float, float, float
     return best_name
 
 
+_shared: Optional["YOLODetector"] = None
+
+
+def get_detector() -> "YOLODetector":
+    """Reuse one YOLO model in-process so Render does not reload weights per video."""
+    global _shared
+    if _shared is None:
+        _shared = YOLODetector()
+    return _shared
+
+
 class YOLODetector:
     def __init__(self, model_path: Optional[str] = None):
+        from ultralytics import YOLO
+
+        Path(settings.models_dir).mkdir(parents=True, exist_ok=True)
         path = model_path or str(Path(settings.models_dir) / "yolov8n.pt")
         self.model = YOLO(path)
         self.confidence = settings.confidence_threshold
