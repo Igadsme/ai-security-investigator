@@ -61,9 +61,9 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = FastAPI(
-    title="AI Security Camera Investigator",
-    description="AI-powered surveillance video investigation platform",
-    version="1.0.0",
+    title="VeriSight",
+    description="Video analytics investigation platform",
+    version="2.0.0",
 )
 
 app.add_middleware(
@@ -298,6 +298,7 @@ def list_detections(
             dominant_color=d.dominant_color,
             bbox={"x1": d.bbox_x1, "y1": d.bbox_y1, "x2": d.bbox_x2, "y2": d.bbox_y2},
             is_false_positive=bool(d.is_false_positive),
+            false_positive_reason=getattr(d, "false_positive_reason", None),
         )
         for d in dets
     ]

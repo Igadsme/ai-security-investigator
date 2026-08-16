@@ -320,8 +320,16 @@ export const forensicApi = {
   audit: (limit = 100) => api.get<AuditEntry[]>("/api/audit", { params: { limit } }),
 
   listCases: () => api.get<Case[]>("/api/cases"),
-  createCase: (body: { title: string; description?: string; notes?: string; site_id?: number; video_ids?: number[] }) =>
-    api.post<Case>("/api/cases", body),
+  createCase: (body: {
+    title: string;
+    description?: string;
+    notes?: string;
+    site_id?: number;
+    video_ids?: number[];
+    case_number?: string;
+    priority?: string;
+    assigned_investigator?: string;
+  }) => api.post<Case>("/api/cases", body),
   getCase: (id: number) => api.get(`/api/cases/${id}`),
   addVideoToCase: (caseId: number, videoId: number) =>
     api.post(`/api/cases/${caseId}/videos/${videoId}`),
@@ -399,8 +407,19 @@ export const forensicApi = {
   }) => api.post<SavedSearch>("/api/saved-searches", body),
   evaluateAlerts: () => api.post<{ triggered: Array<{ alert_id: number; name: string; hit_count: number }> }>("/api/alerts/evaluate"),
 
-  flagFalsePositive: (detectionId: number) =>
-    api.post(`/api/detections/${detectionId}/false-positive`),
+  flagFalsePositive: (detectionId: number, reason?: string) =>
+    api.post(`/api/detections/${detectionId}/false-positive`, null, { params: reason ? { reason } : {} }),
+  flagTrackFalsePositive: (videoId: number, trackId: number, reason?: string) =>
+    api.post(`/api/videos/${videoId}/tracks/${trackId}/false-positive`, null, { params: reason ? { reason } : {} }),
+
+  getWorkspace: (caseId: number) => api.get<import("@/types/verisight").CaseData>(`/api/cases/${caseId}/workspace`),
+  verifyIntegrity: (caseId: number) =>
+    api.post<{ ok: boolean; clips: Array<{ video_id: number; filename: string; ok: boolean; stored?: string; computed?: string }> }>(
+      `/api/cases/${caseId}/verify-integrity`
+    ),
+  caseSummary: (caseId: number) => api.post(`/api/cases/${caseId}/summary`),
+  overlay: (videoId: number, params?: { track_id?: number; stride?: number; limit?: number }) =>
+    api.get<{ video_id: number; width: number; height: number; points: OverlayPoint[] }>(`/api/videos/${videoId}/overlay`, { params }),
 
   batchUpload: (files: File[], opts?: { case_id?: number; camera_codes?: string; retention_days?: number }) => {
     const form = new FormData();
@@ -428,8 +447,118 @@ export const forensicApi = {
     form.append("rtsp_url", rtspUrl);
     return api.post(`/api/cameras/${cameraId}/live`, form);
   },
-  liveSnapshot: (cameraId: number) => api.post(`/api/cameras/${cameraId}/snapshot`),
+  liveSnapshot: (cameraId: number) => api.post<{ video_id: number; job_id: number }>(`/api/cameras/${cameraId}/snapshot`),
 };
+
+export interface OverlayPoint {
+  t: number;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  conf: number;
+  class: string;
+  track_id?: number;
+  color?: string;
+  detection_id: number;
+}
+
+export interface AiSearchResponse {
+  geminiUsed: boolean;
+  matches?: {
+    trackId: string;
+    targetClass: string;
+    timestamp: string;
+    timeSeconds: number;
+    camera: string;
+    confidence: number;
+    reason: string;
+    action: string;
+    clipId?: string;
+  }[];
+  matchingClips?: {
+    camera: string;
+    timeSec: number;
+    reason: string;
+    confidence: number;
+    clipId?: string;
+  }[];
+  summary?: string;
+  anomaliesDetected?: string[];
+  explanation?: string;
+  error?: string;
+}
+
+export interface AiSummaryResponse {
+  geminiUsed: boolean;
+  executiveSummary: string;
+  chronologicalBreakdown?: {
+    time: string;
+    camera: string;
+    subject: string;
+    action: string;
+    significance: "High" | "Medium" | "Low";
+  }[];
+  subjectInventory?: {
+    id: string;
+    classification: string;
+    firstSeen: string;
+    lastSeen: string;
+    dominantTraits: string;
+    threatLevel: string;
+  }[];
+  anomaliesAndViolations?: string[];
+  investigatorRecommendations?: string[];
+  integrityStatement?: string;
+  error?: string;
+}
+
+export async function searchCctvFootage(
+  query: string,
+  caseData: import("@/types/verisight").CaseData,
+  extra?: { object_class?: string; color?: string; min_confidence?: number }
+): Promise<AiSearchResponse> {
+  const caseId = caseData.dbId || Number(caseData.id);
+  const { data } = await searchApi.faceted({
+    query,
+    case_id: caseId,
+    object_class: extra?.object_class,
+    color: extra?.color,
+    min_confidence: extra?.min_confidence ?? 0.3,
+    limit: 80,
+  });
+  const results = (data.results || []) as Array<Record<string, unknown>>;
+  const matches = results.map((r) => ({
+      trackId: r.track_id != null ? `${String(r.object_class || "Object")} #${r.track_id}` : "Unknown",
+      targetClass: String(r.object_class || "person"),
+      timestamp: String(r.timestamp || ""),
+      timeSeconds: Number(r.timestamp_seconds || 0),
+      camera: String(r.camera_code || ""),
+      confidence: Number(r.confidence || 0),
+      reason: String(r.description || "Faceted match"),
+      action: String(r.activity_type || "passing"),
+      clipId: r.video_id != null ? String(r.video_id) : undefined,
+    }));
+  return {
+    geminiUsed: false,
+    explanation: `Matched ${results.length} detections${query ? ` for “${query}”` : ""}.`,
+    summary: data.summary as string | undefined,
+    matches,
+    matchingClips: matches.map((m) => ({
+      camera: m.camera,
+      timeSec: m.timeSeconds,
+      reason: m.reason,
+      confidence: m.confidence,
+      clipId: m.clipId,
+    })),
+  };
+}
+
+export async function generateCaseIncidentSummary(caseData: import("@/types/verisight").CaseData): Promise<AiSummaryResponse> {
+  const caseId = caseData.dbId || Number(caseData.id);
+  const { data } = await forensicApi.caseSummary(caseId);
+  return data as AiSummaryResponse;
+}
 
 /** Authenticated file download (Bearer header) — use instead of window.open for protected routes. */
 export async function downloadAuthed(urlPath: string, filename?: string) {

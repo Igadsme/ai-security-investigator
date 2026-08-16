@@ -1,9 +1,7 @@
 import { useState } from "react";
 import { useRouter } from "next/router";
-import Link from "next/link";
+import { Shield } from "lucide-react";
 import { authApi } from "@/services/api";
-import { FieldLabel, PrimaryBtn, TextInput } from "@/components/ui-kit";
-import { ACCENT, CANVAS, GRID_BG, INK, INK2, PANEL } from "@/lib/theme";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -27,7 +25,7 @@ export default function LoginPage() {
       localStorage.setItem("token", data.access_token);
       localStorage.setItem("username", user);
       const next = typeof router.query.next === "string" ? router.query.next : "/";
-      router.push(next.startsWith("/") ? next : "/");
+      window.location.href = next.startsWith("/") ? next : "/";
     } catch {
       setError(mode === "register" ? "Registration failed" : "Invalid credentials");
     } finally {
@@ -36,72 +34,60 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: CANVAS, ...GRID_BG }}>
-      <div className="w-full max-w-[360px] px-4">
-        <div className="mb-6">
-          <span className="font-mono text-sm font-medium tracking-[0.08em]" style={{ color: INK }}>
-            [ ASCI ]
-          </span>
+    <div className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center px-4">
+      <div className="w-full max-w-sm">
+        <div className="flex items-center space-x-3 mb-8">
+          <div className="w-10 h-10 bg-blue-600 rounded flex items-center justify-center">
+            <Shield className="w-5 h-5 text-white" />
+          </div>
+          <div>
+            <p className="font-semibold text-white">VeriSight</p>
+            <p className="text-xs text-slate-400">Security Investigation Platform</p>
+          </div>
         </div>
-
-        <div className="border rounded-lg overflow-hidden" style={{ backgroundColor: PANEL, borderColor: "var(--border)" }}>
-          <form onSubmit={submit} className="px-8 pt-8 pb-6">
-            <h2 className="text-xl font-semibold mb-1" style={{ color: INK }}>
-              {mode === "login" ? "Sign in" : "Create account"}
-            </h2>
-            <p className="text-sm mb-7" style={{ color: INK2 }}>
-              {mode === "login"
-                ? "Investigate footage with questions, not scrubbing."
-                : "Join your organisation's investigation workspace."}
-            </p>
-
-            <div className="flex flex-col gap-4">
-              {mode === "register" && (
-                <div>
-                  <FieldLabel>Email</FieldLabel>
-                  <TextInput type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="analyst@agency.gov" required />
-                </div>
-              )}
-              <div>
-                <FieldLabel>{mode === "register" ? "Username" : "Email / username"}</FieldLabel>
-                <TextInput
-                  value={username}
-                  onChange={(e) => setUsername(e.target.value)}
-                  placeholder={mode === "register" ? "analyst" : "analyst@agency.gov"}
-                  required
-                />
-              </div>
-              <div>
-                <FieldLabel>Password</FieldLabel>
-                <TextInput type="password" value={password} onChange={(e) => setPassword(e.target.value)} required minLength={6} />
-              </div>
-
-              {error && <p className="text-sm" style={{ color: "#A33232" }}>{error}</p>}
-
-              <PrimaryBtn type="submit" disabled={loading} className="w-full">
-                {loading ? "…" : mode === "login" ? "Sign in" : "Create account"}
-              </PrimaryBtn>
-            </div>
-
-            <p className="text-center text-sm mt-6" style={{ color: INK2 }}>
-              {mode === "login" ? "No account?" : "Already have an account?"}{" "}
-              <button
-                type="button"
-                className="font-medium"
-                style={{ color: ACCENT }}
-                onClick={() => setMode(mode === "login" ? "register" : "login")}
-              >
-                {mode === "login" ? "Register" : "Sign in"}
-              </button>
-            </p>
-          </form>
-        </div>
-
-        <p className="text-center mt-4">
-          <Link href="/" className="text-sm" style={{ color: INK2 }}>
-            Continue without signing in
-          </Link>
-        </p>
+        <form onSubmit={submit} className="bg-slate-900 border border-slate-800 rounded-lg p-5 space-y-3">
+          <p className="text-sm font-medium text-white">{mode === "login" ? "Sign in" : "Create account"}</p>
+          {mode === "register" && (
+            <input
+              className="w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-sm text-slate-100"
+              placeholder="Email"
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              required
+            />
+          )}
+          <input
+            className="w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-sm text-slate-100"
+            placeholder="Username"
+            value={username}
+            onChange={(e) => setUsername(e.target.value)}
+            required
+          />
+          <input
+            className="w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-sm text-slate-100"
+            placeholder="Password"
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            required
+          />
+          {error && <p className="text-xs text-rose-400">{error}</p>}
+          <button
+            type="submit"
+            disabled={loading}
+            className="w-full bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium py-2 rounded"
+          >
+            {loading ? "Please wait…" : mode === "login" ? "Sign in" : "Register"}
+          </button>
+          <button
+            type="button"
+            className="w-full text-xs text-slate-400 hover:text-slate-200"
+            onClick={() => setMode(mode === "login" ? "register" : "login")}
+          >
+            {mode === "login" ? "Need an account? Register" : "Have an account? Sign in"}
+          </button>
+        </form>
       </div>
     </div>
   );

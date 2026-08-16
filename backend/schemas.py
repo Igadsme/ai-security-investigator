@@ -77,6 +77,7 @@ class DetectionResponse(BaseModel):
     dominant_color: Optional[str] = None
     bbox: dict
     is_false_positive: bool = False
+    false_positive_reason: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -204,6 +205,9 @@ class CameraCreate(BaseModel):
     lng: Optional[float] = None
     floor_x: Optional[float] = Field(None, validation_alias=AliasChoices("floor_x", "pos_x"))
     floor_y: Optional[float] = Field(None, validation_alias=AliasChoices("floor_y", "pos_y"))
+    zone: Optional[str] = None
+    map_angle: Optional[float] = None
+    map_fov: Optional[float] = None
     rtsp_url: Optional[str] = None
 
     model_config = {"populate_by_name": True}
@@ -219,6 +223,9 @@ class CameraResponse(BaseModel):
     lng: Optional[float] = None
     floor_x: Optional[float] = None
     floor_y: Optional[float] = None
+    zone: Optional[str] = None
+    map_angle: Optional[float] = None
+    map_fov: Optional[float] = None
     rtsp_url: Optional[str] = None
     is_live: bool = False
     created_at: datetime
@@ -233,13 +240,22 @@ class CaseCreate(BaseModel):
     notes: Optional[str] = None
     site_id: Optional[int] = None
     video_ids: Optional[list[int]] = None
+    case_number: Optional[str] = None
+    priority: Optional[str] = "medium"
+    assigned_investigator: Optional[str] = None
+    incident_time: Optional[datetime] = None
+    status: Optional[str] = None
 
 
 class CaseResponse(BaseModel):
     id: int
     title: str
+    case_number: Optional[str] = None
     description: Optional[str] = None
     status: Any
+    priority: Optional[str] = "medium"
+    assigned_investigator: Optional[str] = None
+    incident_time: Optional[datetime] = None
     notes: Optional[str] = None
     site_id: Optional[int] = None
     owner_id: Optional[int] = None
@@ -282,6 +298,7 @@ class AnnotationCreate(BaseModel):
     track_id: Optional[int] = None
     timestamp_seconds: Optional[float] = None
     flag: Optional[str] = None
+    tags: Optional[list[str]] = None
 
 
 class AnnotationResponse(BaseModel):
@@ -292,6 +309,7 @@ class AnnotationResponse(BaseModel):
     author_id: Optional[int] = None
     body: str
     flag: Optional[str] = None
+    tags: Optional[list] = None
     created_at: datetime
 
     class Config:

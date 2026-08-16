@@ -96,6 +96,8 @@ def main() -> None:
         v.duration_seconds = 3.0
         v.camera_code = "ENT-01"
         v.file_sha256 = "abc123"
+        v.width = 320
+        v.height = 240
         db.add(v)
         if not db.query(Detection).filter(Detection.video_id == video_id).first():
             d = Detection(
@@ -272,6 +274,17 @@ def main() -> None:
             data={"camera_codes": "LOT-03", "retention_days": "14"},
         )
     check("batch upload", batch.status_code == 200 and batch.json().get("batch_id"), batch.text[:120])
+
+    # VeriSight workspace / overlay / integrity / summary
+    ws = client.get(f"/api/cases/{case['id']}/workspace", headers=h)
+    check("case workspace", ws.status_code == 200 and "clips" in ws.json(), ws.text[:160])
+    ov = client.get(f"/api/videos/{video_id}/overlay", headers=h)
+    check("video overlay", ov.status_code == 200 and isinstance(ov.json().get("points"), list), ov.text[:160])
+    integ = client.post(f"/api/cases/{case['id']}/verify-integrity", headers=h)
+    check("verify integrity", integ.status_code == 200 and "ok" in integ.json(), integ.text[:160])
+    summ = client.post(f"/api/cases/{case['id']}/summary", headers=h)
+    check("case summary", summ.status_code == 200 and "executiveSummary" in summ.json(), summ.text[:200])
+    check("create case number", bool(case.get("case_number")), str(case))
 
     print("\n==== SUMMARY ====")
     if fails:

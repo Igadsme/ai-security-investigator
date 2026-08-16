@@ -17,6 +17,20 @@ def test_health(client):
     assert resp.json()["status"] == "ok"
 
 
+def test_case_workspace_empty(client):
+    client.post("/api/auth/register", json={"email": "ws@example.com", "username": "wsuser", "password": "testpass123"})
+    tok = client.post("/api/auth/login", data={"username": "wsuser", "password": "testpass123"}).json()["access_token"]
+    h = {"Authorization": f"Bearer {tok}"}
+    created = client.post("/api/cases", headers=h, json={"title": "Empty", "priority": "high"}).json()
+    assert created.get("case_number")
+    ws = client.get(f"/api/cases/{created['id']}/workspace", headers=h)
+    assert ws.status_code == 200
+    body = ws.json()
+    assert body["title"] == "Empty"
+    assert body["priority"] == "high"
+    assert body["clips"] == []
+
+
 def test_register_and_login(client):
     resp = client.post("/api/auth/register", json={
         "email": "test@example.com",

@@ -1,5 +1,5 @@
 ---
-title: AI Security Camera Investigator
+title: VeriSight
 emoji: 📹
 colorFrom: green
 colorTo: gray
@@ -9,13 +9,12 @@ suggested_hardware: cpu-upgrade
 fullWidth: true
 pinned: false
 license: mit
-short_description: Upload CCTV footage and investigate with YOLO, tracking, and natural-language search.
+short_description: CCTV investigation with YOLO overlays, NL search, multi-camera timeline, and chain-of-custody.
 ---
 
-# AI Security Camera Investigator
+# VeriSight
 
-An AI-powered surveillance video investigation platform that combines computer vision, object tracking, vector search, and natural language querying.
-Upload footage and ask questions like *"Show me every person who entered the room"* or *"When did the white car appear?"**, and get timestamps, clips, and AI-generated summaries.
+Security investigation platform for CCTV footage. Upload video, run YOLOv8 detection and tracking, then review cases with bounding-box playback, natural-language search, multi-camera timelines, evidence export, and an audit log.
 
 ## Features
 

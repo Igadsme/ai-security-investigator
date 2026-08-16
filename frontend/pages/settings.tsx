@@ -1,12 +1,10 @@
 import { useEffect, useState } from "react";
 import Layout from "@/components/Layout";
-import { PrimaryBtn, TopBar } from "@/components/ui-kit";
-import { authApi, forensicApi } from "@/services/api";
-import { BORDER, CANVAS, INK, INK2, PANEL } from "@/lib/theme";
+import { forensicApi, authApi } from "@/services/api";
+import { useCase } from "@/lib/CaseContext";
 
 export default function SettingsPage() {
-  const [me, setMe] = useState<{ id: number; username: string; role: string } | null>(null);
-  const [retention, setRetention] = useState<{ retention_days?: number; auto_delete?: boolean }>({});
+  const ctx = useCase();
   const [days, setDays] = useState(90);
   const [autoDelete, setAutoDelete] = useState(true);
   const [roleUserId, setRoleUserId] = useState("");
@@ -14,136 +12,79 @@ export default function SettingsPage() {
   const [msg, setMsg] = useState("");
 
   useEffect(() => {
-    authApi.me().then(({ data }) => setMe(data)).catch(() => setMe(null));
-    forensicApi
-      .getRetention()
-      .then(({ data }) => {
-        const d = data as any;
-        setRetention(d);
-        if (d.retention_days) setDays(d.retention_days);
-        if (d.auto_delete != null) setAutoDelete(Boolean(d.auto_delete));
-      })
-      .catch(() => {});
+    forensicApi.getRetention().then(({ data }) => {
+      const d = data as { retention_days?: number; auto_delete?: boolean };
+      if (d.retention_days) setDays(d.retention_days);
+      if (d.auto_delete != null) setAutoDelete(Boolean(d.auto_delete));
+    }).catch(() => {});
   }, []);
 
   return (
     <Layout>
-      <div className="min-h-screen flex flex-col" style={{ backgroundColor: CANVAS }}>
-        <TopBar title="Settings" subtitle="Roles, retention policy, operational controls" />
-        <div className="px-8 py-6 max-w-2xl space-y-6">
-          <div className="border rounded-lg p-5" style={{ backgroundColor: PANEL, borderColor: BORDER }}>
-            <p className="text-[11px] font-semibold uppercase tracking-[0.06em] mb-2" style={{ color: INK2 }}>
-              Your role
-            </p>
-            {me ? (
-              <p className="text-sm" style={{ color: INK }}>
-                Signed in as <span className="font-mono">{me.username}</span> · role{" "}
-                <span className="font-mono">{me.role}</span>
-              </p>
-            ) : (
-              <p className="text-sm" style={{ color: INK2 }}>
-                Not signed in.
-              </p>
-            )}
-            <p className="text-xs mt-2" style={{ color: INK2 }}>
-              viewer · investigator · admin — viewers cannot export evidence or delete footage.
-            </p>
-          </div>
-
-          <div className="border rounded-lg p-5" style={{ backgroundColor: PANEL, borderColor: BORDER }}>
-            <p className="text-[11px] font-semibold uppercase tracking-[0.06em] mb-3" style={{ color: INK2 }}>
-              Retention & auto-delete
-            </p>
-            <label className="block text-xs mb-1" style={{ color: INK2 }}>
-              Default retention days
-            </label>
+      <div className="p-5 max-w-xl mx-auto space-y-4">
+        <h1 className="text-sm font-semibold text-white">Settings</h1>
+        <div className="bg-slate-900 border border-slate-800 rounded-lg p-4 space-y-2 text-sm">
+          <p className="text-slate-400 text-xs uppercase tracking-wide">Signed in</p>
+          <p className="text-slate-100">
+            {ctx.me?.username} · <span className="capitalize">{ctx.me?.role}</span>
+          </p>
+        </div>
+        <div className="bg-slate-900 border border-slate-800 rounded-lg p-4 space-y-3">
+          <p className="text-xs uppercase tracking-wide text-slate-400">Retention</p>
+          <label className="block text-xs text-slate-400">
+            Days
             <input
               type="number"
-              className="w-40 text-sm px-3 py-2 border rounded-sm mb-3"
-              style={{ borderColor: BORDER, backgroundColor: CANVAS, color: INK }}
+              className="mt-1 w-full bg-slate-950 border border-slate-700 rounded px-2 py-1.5 text-slate-100"
               value={days}
               onChange={(e) => setDays(Number(e.target.value))}
             />
-            <label className="flex items-center gap-2 text-xs mb-3" style={{ color: INK }}>
-              <input type="checkbox" checked={autoDelete} onChange={(e) => setAutoDelete(e.target.checked)} />
-              Auto-delete after retention window
-            </label>
-            <div className="flex gap-2 flex-wrap">
-              <PrimaryBtn
-                onClick={async () => {
-                  try {
-                    await forensicApi.updateRetention({ retention_days: days, auto_delete: autoDelete });
-                    setMsg("Retention policy saved");
-                  } catch {
-                    setMsg("Admin required to update retention");
-                  }
-                }}
-              >
-                Save policy
-              </PrimaryBtn>
-              <PrimaryBtn
-                onClick={async () => {
-                  try {
-                    const { data } = await forensicApi.runRetention();
-                    setMsg(`Cleanup: ${JSON.stringify(data)}`);
-                  } catch {
-                    setMsg("Cleanup failed");
-                  }
-                }}
-              >
-                Run cleanup now
-              </PrimaryBtn>
-            </div>
-            {retention.retention_days != null && (
-              <p className="text-xs mt-2 font-mono" style={{ color: INK2 }}>
-                Current: {retention.retention_days}d · auto={String(retention.auto_delete)}
-              </p>
-            )}
-          </div>
-
-          <div className="border rounded-lg p-5" style={{ backgroundColor: PANEL, borderColor: BORDER }}>
-            <p className="text-[11px] font-semibold uppercase tracking-[0.06em] mb-3" style={{ color: INK2 }}>
-              Assign user role (admin)
-            </p>
-            <div className="flex gap-2 flex-wrap">
-              <input
-                className="text-sm px-3 py-2 border rounded-sm w-28"
-                style={{ borderColor: BORDER, backgroundColor: CANVAS, color: INK }}
-                placeholder="User ID"
-                value={roleUserId}
-                onChange={(e) => setRoleUserId(e.target.value)}
-              />
-              <select
-                className="text-sm px-3 py-2 border rounded-sm"
-                style={{ borderColor: BORDER, backgroundColor: CANVAS, color: INK }}
-                value={role}
-                onChange={(e) => setRole(e.target.value)}
-              >
-                <option value="viewer">viewer</option>
-                <option value="investigator">investigator</option>
-                <option value="admin">admin</option>
-              </select>
-              <PrimaryBtn
-                onClick={async () => {
-                  try {
-                    await forensicApi.setUserRole(Number(roleUserId), role);
-                    setMsg(`User ${roleUserId} → ${role}`);
-                  } catch {
-                    setMsg("Admin required");
-                  }
-                }}
-              >
-                Update role
-              </PrimaryBtn>
-            </div>
-          </div>
-
-          {msg && (
-            <p className="text-sm font-mono" style={{ color: INK2 }}>
-              {msg}
-            </p>
-          )}
+          </label>
+          <label className="flex items-center space-x-2 text-xs text-slate-300">
+            <input type="checkbox" checked={autoDelete} onChange={(e) => setAutoDelete(e.target.checked)} />
+            <span>Auto-delete expired footage</span>
+          </label>
+          <button
+            className="px-3 py-1.5 bg-blue-600 text-white text-xs rounded"
+            onClick={async () => {
+              await forensicApi.updateRetention({ retention_days: days, auto_delete: autoDelete });
+              setMsg("Retention saved");
+            }}
+          >
+            Save policy
+          </button>
         </div>
+        {ctx.me?.role === "admin" && (
+          <div className="bg-slate-900 border border-slate-800 rounded-lg p-4 space-y-3">
+            <p className="text-xs uppercase tracking-wide text-slate-400">Assign role</p>
+            <input
+              className="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1.5 text-sm text-slate-100"
+              placeholder="User id"
+              value={roleUserId}
+              onChange={(e) => setRoleUserId(e.target.value)}
+            />
+            <select
+              className="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1.5 text-sm text-slate-100"
+              value={role}
+              onChange={(e) => setRole(e.target.value)}
+            >
+              <option value="viewer">Viewer</option>
+              <option value="investigator">Investigator</option>
+              <option value="admin">Admin</option>
+            </select>
+            <button
+              className="px-3 py-1.5 bg-slate-800 border border-slate-700 text-xs rounded text-slate-100"
+              onClick={async () => {
+                await forensicApi.setUserRole(Number(roleUserId), role);
+                setMsg("Role updated");
+                await authApi.me();
+              }}
+            >
+              Update role
+            </button>
+          </div>
+        )}
+        {msg && <p className="text-xs text-emerald-400">{msg}</p>}
       </div>
     </Layout>
   );

@@ -45,8 +45,16 @@ class UserRole(str, enum.Enum):
 
 class CaseStatus(str, enum.Enum):
     OPEN = "open"
+    UNDER_REVIEW = "under_review"
     CLOSED = "closed"
     ARCHIVED = "archived"
+
+
+class CasePriority(str, enum.Enum):
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+    CRITICAL = "critical"
 
 
 class AlertStatus(str, enum.Enum):
@@ -98,6 +106,9 @@ class Camera(Base):
     lng = Column(Float, nullable=True)
     floor_x = Column(Float, nullable=True)
     floor_y = Column(Float, nullable=True)
+    zone = Column(String(255), nullable=True)
+    map_angle = Column(Float, nullable=True)
+    map_fov = Column(Float, nullable=True)
     rtsp_url = Column(String(1024), nullable=True)
     is_live = Column(Boolean, default=False)
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -155,6 +166,7 @@ class Detection(Base):
     track_id = Column(Integer, nullable=True, index=True)
     dominant_color = Column(String(50), nullable=True)
     is_false_positive = Column(Boolean, default=False)
+    false_positive_reason = Column(Text, nullable=True)
     extra_metadata = Column(JSON, nullable=True)
 
     video = relationship("Video", back_populates="detections")
@@ -231,8 +243,12 @@ class Case(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     title = Column(String(255), nullable=False)
+    case_number = Column(String(64), nullable=True, index=True)
     description = Column(Text, nullable=True)
     status = Column(Enum(CaseStatus), default=CaseStatus.OPEN)
+    priority = Column(String(20), default="medium")
+    assigned_investigator = Column(String(255), nullable=True)
+    incident_time = Column(DateTime, nullable=True)
     owner_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     site_id = Column(Integer, ForeignKey("sites.id"), nullable=True)
     notes = Column(Text, nullable=True)
@@ -267,6 +283,7 @@ class Annotation(Base):
     author_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     body = Column(Text, nullable=False)
     flag = Column(String(50), nullable=True)  # suspect|person_of_interest|cleared
+    tags = Column(JSON, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
     author = relationship("User", back_populates="annotations")

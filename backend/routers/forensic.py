@@ -17,6 +17,8 @@ from database import get_db
 from database.crud import create_processing_job, create_video, get_video
 from database.models import (
     Annotation,
+    ActivityEvent,
+    AuditLog,
     Case,
     CaseItem,
     CaseStatus,
@@ -24,6 +26,7 @@ from database.models import (
     Comment,
     Detection,
     EvidenceExport,
+    ProcessingJob,
     ReIDMatch,
     RetentionPolicy,
     SavedSearch,
@@ -66,6 +69,279 @@ router = APIRouter(prefix="/api", tags=["forensic"])
 
 def _ip(request: Request) -> Optional[str]:
     return request.client.host if request.client else None
+
+
+def _enum_val(v):
+    return v.value if hasattr(v, "value") else v
+
+
+def _next_case_number(db: Session) -> str:
+    year = datetime.utcnow().year
+    prefix = f"VS-{year}-"
+    count = db.query(Case).filter(Case.case_number.like(f"{prefix}%")).count()
+    return f"{prefix}{count + 1:04d}"
+
+
+def _case_videos(db: Session, case_id: int) -> list[Video]:
+    items = db.query(CaseItem).filter(CaseItem.case_id == case_id, CaseItem.item_type == "video").all()
+    videos = []
+    for it in items:
+        if it.video_id:
+            v = get_video(db, it.video_id)
+            if v:
+                videos.append(v)
+    return videos
+
+
+def _map_class(name: Optional[str]) -> str:
+    raw = (name or "person").lower()
+    if raw in ("bicycle", "motorcycle"):
+        return "bike"
+    if raw in ("backpack", "handbag", "suitcase"):
+        return "bag"
+    if raw in ("person", "car", "truck", "bike", "dog", "bag"):
+        return raw
+    return "person"
+
+
+def _map_action(activity_type) -> str:
+    val = _enum_val(activity_type) or ""
+    mapping = {
+        "abandoned_object": "left_object",
+        "vehicle_arrival": "entry",
+        "vehicle_departure": "exit",
+        "trespassing": "passing",
+        "loitering": "loitering",
+        "running": "running",
+        "entry": "entry",
+        "exit": "exit",
+    }
+    return mapping.get(str(val), "passing")
+
+
+def _severity(activity_type, stored: Optional[str] = None) -> str:
+    if stored and stored in ("low", "medium", "high", "critical"):
+        return stored
+    val = str(_enum_val(activity_type) or "")
+    if val in ("trespassing", "abandoned_object"):
+        return "high"
+    if val in ("loitering", "running"):
+        return "medium"
+    return "low"
+
+
+def build_case_workspace(db: Session, case: Case) -> dict:
+    videos = _case_videos(db, case.id)
+    video_ids = [v.id for v in videos]
+    cameras = []
+    seen_cam = set()
+    for v in videos:
+        if v.camera_id and v.camera_id not in seen_cam:
+            cam = db.query(Camera).filter(Camera.id == v.camera_id).first()
+            if cam:
+                seen_cam.add(cam.id)
+                cameras.append(cam)
+        elif v.camera_code:
+            cam = db.query(Camera).filter(Camera.camera_code == v.camera_code).first()
+            if cam and cam.id not in seen_cam:
+                seen_cam.add(cam.id)
+                cameras.append(cam)
+    if case.site_id:
+        for cam in db.query(Camera).filter(Camera.site_id == case.site_id).all():
+            if cam.id not in seen_cam:
+                seen_cam.add(cam.id)
+                cameras.append(cam)
+
+    clips = []
+    for v in videos:
+        job = None
+        if v.jobs:
+            job = v.jobs[-1]
+        tracks = db.query(Track).filter(Track.video_id == v.id).order_by(Track.track_id).all()
+        events = db.query(ActivityEvent).filter(ActivityEvent.video_id == v.id).order_by(ActivityEvent.start_seconds).all()
+        fp_tracks = {
+            d.track_id
+            for d in db.query(Detection)
+            .filter(Detection.video_id == v.id, Detection.is_false_positive.is_(True), Detection.track_id != None)  # noqa: E711
+            .all()
+        }
+        fp_reason = {}
+        for d in db.query(Detection).filter(
+            Detection.video_id == v.id, Detection.is_false_positive.is_(True), Detection.false_positive_reason != None  # noqa: E711
+        ).all():
+            if d.track_id is not None and d.track_id not in fp_reason:
+                fp_reason[d.track_id] = d.false_positive_reason
+
+        reid = {}
+        for t in tracks:
+            if t.global_identity:
+                linked = db.query(Track).filter(Track.global_identity == t.global_identity, Track.id != t.id).all()
+                reid[t.id] = {
+                    "globalSubjectId": t.global_identity,
+                    "linkedTracks": [
+                        {
+                            "camera": (get_video(db, lt.video_id).camera_code if get_video(db, lt.video_id) else "") or "",
+                            "trackId": f"{_map_class(lt.object_class).title()} #{lt.track_id}",
+                            "timeRange": f"{format_timestamp(lt.first_seen_seconds)}–{format_timestamp(lt.last_seen_seconds)}",
+                        }
+                        for lt in linked[:8]
+                    ],
+                }
+
+        clips.append({
+            "id": str(v.id),
+            "videoId": v.id,
+            "title": v.original_filename,
+            "filename": v.original_filename,
+            "fileSizeMb": round(Path(v.filepath).stat().st_size / 1e6, 2) if Path(v.filepath).is_file() else 0,
+            "durationSeconds": v.duration_seconds or 0,
+            "camera": v.camera_code or (v.camera.name if v.camera else f"CAM-{v.id}"),
+            "recordedAt": (v.recorded_at or v.created_at).isoformat() if (v.recorded_at or v.created_at) else None,
+            "videoUrl": f"/api/videos/{v.id}/stream",
+            "sha256": v.file_sha256 or "",
+            "status": _enum_val(v.status),
+            "width": v.width,
+            "height": v.height,
+            "job": {
+                "status": job.status if job else None,
+                "progress": job.progress if job else None,
+                "stage": job.stage if job else None,
+            } if job else None,
+            "tracks": [
+                {
+                    "id": f"{_map_class(t.object_class).title()} #{t.track_id}",
+                    "dbId": t.id,
+                    "trackId": t.track_id,
+                    "targetClass": _map_class(t.object_class),
+                    "camera": v.camera_code or f"CAM-{v.id}",
+                    "color": t.dominant_color or "unknown",
+                    "firstSeenSec": t.first_seen_seconds,
+                    "lastSeenSec": t.last_seen_seconds,
+                    "confidence": 0.8,
+                    "isFalsePositive": t.track_id in fp_tracks,
+                    "falsePositiveReason": fp_reason.get(t.track_id),
+                    "points": [],
+                    "crossCameraReId": reid.get(t.id),
+                }
+                for t in tracks
+            ],
+            "events": [
+                {
+                    "id": str(ev.id),
+                    "timestamp": format_timestamp(ev.start_seconds),
+                    "timeSeconds": ev.start_seconds,
+                    "camera": v.camera_code or f"CAM-{v.id}",
+                    "trackId": f"{_map_class(ev.object_class).title()} #{ev.track_id}" if ev.track_id is not None else "",
+                    "targetClass": _map_class(ev.object_class),
+                    "action": _map_action(ev.activity_type),
+                    "title": str(_enum_val(ev.activity_type)).replace("_", " ").title(),
+                    "description": ev.description,
+                    "severity": _severity(ev.activity_type, ev.severity),
+                }
+                for ev in events
+            ],
+        })
+
+    notes = []
+    if video_ids:
+        for a in db.query(Annotation).filter(Annotation.video_id.in_(video_ids)).order_by(Annotation.created_at.desc()).all():
+            author = db.query(User).filter(User.id == a.author_id).first() if a.author_id else None
+            v = get_video(db, a.video_id)
+            notes.append({
+                "id": str(a.id),
+                "author": author.username if author else "Investigator",
+                "timestampSec": a.timestamp_seconds or 0,
+                "createdAt": a.created_at.isoformat() if a.created_at else None,
+                "text": a.body,
+                "camera": v.camera_code if v else "",
+                "tags": a.tags or ([a.flag] if a.flag else []),
+                "videoId": a.video_id,
+            })
+
+    alerts = db.query(SavedSearch).filter(SavedSearch.is_alert == True).order_by(SavedSearch.created_at.desc()).all()  # noqa: E712
+    standing = []
+    for al in alerts:
+        filt = al.filters or {}
+        standing.append({
+            "id": str(al.id),
+            "name": al.name,
+            "targetClass": filt.get("object_class") or "any",
+            "camera": filt.get("camera_code") or "all",
+            "action": filt.get("activity_type") or "any",
+            "color": filt.get("color"),
+            "minConfidence": float(filt.get("min_confidence") or 0.4),
+            "enabled": _enum_val(al.alert_status) != "paused",
+            "createdAt": al.created_at.isoformat() if al.created_at else None,
+            "triggeredCount": 1 if al.last_triggered_at else 0,
+            "lastTriggered": al.last_triggered_at.isoformat() if al.last_triggered_at else None,
+            "query": al.query,
+        })
+
+    audits = (
+        db.query(AuditLog)
+        .filter(AuditLog.resource_type.in_(["case", "video", "evidence", "annotation"]))
+        .order_by(AuditLog.created_at.desc())
+        .limit(80)
+        .all()
+    )
+    audit_logs = [
+        {
+            "id": str(r.id),
+            "timestamp": r.created_at.strftime("%Y-%m-%d %H:%M:%S UTC") if r.created_at else "",
+            "investigator": r.username or "system",
+            "actionType": r.action,
+            "details": r.details if isinstance(r.details, str) else (str(r.details) if r.details else r.action),
+            "sha256Proof": (r.details or {}).get("sha256") if isinstance(r.details, dict) else None,
+            "ipAddress": r.ip_address,
+        }
+        for r in audits
+    ]
+
+    owner = db.query(User).filter(User.id == case.owner_id).first() if case.owner_id else None
+    status = _enum_val(case.status)
+    if status == "archived":
+        ui_status = "closed"
+    else:
+        ui_status = status or "open"
+
+    return {
+        "id": str(case.id),
+        "dbId": case.id,
+        "caseNumber": case.case_number or f"VS-{case.id:04d}",
+        "title": case.title,
+        "description": case.description or "",
+        "status": ui_status,
+        "priority": case.priority or "medium",
+        "assignedInvestigator": case.assigned_investigator or (owner.username if owner else ""),
+        "createdAt": case.created_at.isoformat() if case.created_at else None,
+        "incidentTime": case.incident_time.isoformat() if case.incident_time else (case.created_at.isoformat() if case.created_at else None),
+        "siteId": case.site_id,
+        "cameras": [
+            {
+                "id": str(c.id),
+                "dbId": c.id,
+                "name": c.name,
+                "cameraCode": c.camera_code,
+                "location": c.location_label or c.name,
+                "zone": c.zone or "main",
+                "resolution": "1080p",
+                "fps": 10,
+                "status": "online" if c.is_live else "recorded",
+                "mapCoords": {
+                    "x": (c.floor_x if c.floor_x is not None else 40),
+                    "y": (c.floor_y if c.floor_y is not None else 40),
+                    "angle": c.map_angle if c.map_angle is not None else 45,
+                    "fov": c.map_fov if c.map_fov is not None else 70,
+                },
+                "rtspUrl": c.rtsp_url,
+            }
+            for c in cameras
+        ],
+        "clips": clips,
+        "notes": notes,
+        "auditLogs": audit_logs,
+        "standingAlerts": standing,
+    }
 
 
 # ── Audit ─────────────────────────────────────────────────────────────────────
@@ -157,6 +433,9 @@ def site_map(site_id: int, db: Session = Depends(get_db)):
             "lng": cam.lng,
             "floor_x": cam.floor_x,
             "floor_y": cam.floor_y,
+            "zone": cam.zone,
+            "map_angle": cam.map_angle,
+            "map_fov": cam.map_fov,
             "pos_x": cam.floor_x,
             "pos_y": cam.floor_y,
             "detection_count": det_count,
@@ -170,7 +449,24 @@ def site_map(site_id: int, db: Session = Depends(get_db)):
 
 @router.post("/cases", response_model=CaseResponse)
 def create_case(body: CaseCreate, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    case = Case(title=body.title, description=body.description, notes=body.notes, owner_id=user.id, site_id=body.site_id)
+    status = CaseStatus.OPEN
+    if body.status:
+        try:
+            status = CaseStatus(body.status)
+        except ValueError:
+            status = CaseStatus.OPEN
+    case = Case(
+        title=body.title,
+        description=body.description,
+        notes=body.notes,
+        owner_id=user.id,
+        site_id=body.site_id,
+        case_number=body.case_number or _next_case_number(db),
+        priority=body.priority or "medium",
+        assigned_investigator=body.assigned_investigator or user.username,
+        incident_time=body.incident_time,
+        status=status,
+    )
     db.add(case)
     db.commit()
     db.refresh(case)
@@ -210,8 +506,12 @@ def get_case(case_id: int, db: Session = Depends(get_db), user: Optional[User] =
     return {
         "id": case.id,
         "title": case.title,
+        "case_number": case.case_number,
         "description": case.description,
-        "status": case.status.value if hasattr(case.status, "value") else case.status,
+        "status": _enum_val(case.status),
+        "priority": case.priority or "medium",
+        "assigned_investigator": case.assigned_investigator,
+        "incident_time": case.incident_time,
         "notes": case.notes,
         "site_id": case.site_id,
         "created_at": case.created_at,
@@ -219,6 +519,183 @@ def get_case(case_id: int, db: Session = Depends(get_db), user: Optional[User] =
         "items": [{"id": i.id, "item_type": i.item_type, "video_id": i.video_id, "reference": i.reference, "meta": i.meta} for i in items],
         "videos": videos,
     }
+
+
+@router.get("/cases/{case_id}/workspace")
+def case_workspace(case_id: int, db: Session = Depends(get_db), user: Optional[User] = Depends(get_current_user_optional)):
+    case = db.query(Case).filter(Case.id == case_id).first()
+    if not case:
+        raise HTTPException(404, "Case not found")
+    log_action(db, action="case.view", user=user, resource_type="case", resource_id=case_id)
+    return build_case_workspace(db, case)
+
+
+@router.post("/cases/{case_id}/verify-integrity")
+def verify_case_integrity(case_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    case = db.query(Case).filter(Case.id == case_id).first()
+    if not case:
+        raise HTTPException(404, "Case not found")
+    results = []
+    ok = True
+    for v in _case_videos(db, case_id):
+        path = Path(v.filepath)
+        if not path.is_file():
+            results.append({"video_id": v.id, "filename": v.original_filename, "ok": False, "reason": "missing_file"})
+            ok = False
+            continue
+        digest = sha256_file(path)
+        match = bool(v.file_sha256) and digest == v.file_sha256
+        if not match:
+            ok = False
+        results.append({
+            "video_id": v.id,
+            "filename": v.original_filename,
+            "stored": v.file_sha256,
+            "computed": digest,
+            "ok": match,
+        })
+    log_action(
+        db, action="sha_verified", user=user, resource_type="case", resource_id=case_id,
+        details={"ok": ok, "clips": len(results)},
+    )
+    return {"ok": ok, "clips": results}
+
+
+@router.post("/cases/{case_id}/summary")
+def case_ai_summary(case_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    from search.nl_search import _complete, _fallback_summary
+    import json
+
+    case = db.query(Case).filter(Case.id == case_id).first()
+    if not case:
+        raise HTTPException(404, "Case not found")
+    ws = build_case_workspace(db, case)
+    payload = {
+        "caseNumber": ws["caseNumber"],
+        "title": ws["title"],
+        "clips": [
+            {
+                "filename": c["filename"],
+                "camera": c["camera"],
+                "tracks": [{"id": t["id"], "class": t["targetClass"], "color": t["color"], "first": t["firstSeenSec"], "last": t["lastSeenSec"]} for t in c["tracks"][:20]],
+                "events": [{"time": e["timestamp"], "action": e["action"], "description": e["description"]} for e in c["events"][:20]],
+            }
+            for c in ws["clips"]
+        ],
+    }
+    prompt = f"""You are a forensic video analyst for VeriSight. Write a structured incident summary as JSON only.
+
+Case data:
+{json.dumps(payload)[:12000]}
+
+Return JSON with keys:
+- executiveSummary (string)
+- chronologicalBreakdown (array of {{time, camera, subject, action, significance}})
+- subjectInventory (array of {{id, classification, firstSeen, lastSeen, dominantTraits, threatLevel}})
+- anomaliesAndViolations (string array)
+- investigatorRecommendations (string array)
+- integrityStatement (string)
+"""
+    gemini_used = False
+    parsed = None
+    try:
+        content = _complete(prompt, temperature=0.2, max_tokens=1200, timeout=60)
+        if content:
+            gemini_used = True
+            match = None
+            import re
+            match = re.search(r"\{.*\}", content, re.DOTALL)
+            if match:
+                parsed = json.loads(match.group())
+    except Exception:
+        parsed = None
+
+    if not parsed:
+        events = []
+        for c in ws["clips"]:
+            events.extend(c["events"][:8])
+        stats = {
+            "clips": len(ws["clips"]),
+            "tracks": sum(len(c["tracks"]) for c in ws["clips"]),
+            "events": sum(len(c["events"]) for c in ws["clips"]),
+        }
+        parsed = {
+            "executiveSummary": _fallback_summary(stats, events),
+            "chronologicalBreakdown": [
+                {
+                    "time": e.get("timestamp"),
+                    "camera": e.get("camera"),
+                    "subject": e.get("trackId"),
+                    "action": e.get("action"),
+                    "significance": (e.get("severity") or "low").title(),
+                }
+                for e in events[:12]
+            ],
+            "subjectInventory": [
+                {
+                    "id": t["id"],
+                    "classification": t["targetClass"],
+                    "firstSeen": format_timestamp(t["firstSeenSec"]),
+                    "lastSeen": format_timestamp(t["lastSeenSec"]),
+                    "dominantTraits": t.get("color") or "unknown",
+                    "threatLevel": "Watch" if t.get("isFalsePositive") else "Review",
+                }
+                for c in ws["clips"] for t in c["tracks"][:12]
+            ],
+            "anomaliesAndViolations": [e["description"] for c in ws["clips"] for e in c["events"] if e.get("severity") in ("high", "critical")][:8],
+            "investigatorRecommendations": [
+                "Review flagged tracks and confirm false positives.",
+                "Export evidence clips for chain-of-custody packaging.",
+            ],
+            "integrityStatement": "Hashes recorded at ingest. Run Verify Integrity to recompute SHA-256 against stored files.",
+        }
+
+    log_action(db, action="case.summary", user=user, resource_type="case", resource_id=case_id)
+    return {"geminiUsed": gemini_used, **parsed}
+
+
+@router.get("/videos/{video_id}/overlay")
+def video_overlay(
+    video_id: int,
+    track_id: Optional[int] = None,
+    start_seconds: Optional[float] = None,
+    end_seconds: Optional[float] = None,
+    stride: int = Query(2, ge=1, le=30),
+    limit: int = Query(800, le=4000),
+    db: Session = Depends(get_db),
+):
+    video = get_video(db, video_id)
+    if not video:
+        raise HTTPException(404, "Video not found")
+    w = float(video.width or 1280)
+    h = float(video.height or 720)
+    q = db.query(Detection).filter(Detection.video_id == video_id, Detection.is_false_positive.is_(False))
+    if track_id is not None:
+        q = q.filter(Detection.track_id == track_id)
+    if start_seconds is not None:
+        q = q.filter(Detection.timestamp_seconds >= start_seconds)
+    if end_seconds is not None:
+        q = q.filter(Detection.timestamp_seconds <= end_seconds)
+    rows = q.order_by(Detection.timestamp_seconds, Detection.id).limit(limit * stride).all()
+    points = []
+    for i, d in enumerate(rows):
+        if i % stride != 0:
+            continue
+        points.append({
+            "t": d.timestamp_seconds,
+            "x": round(100.0 * d.bbox_x1 / w, 3),
+            "y": round(100.0 * d.bbox_y1 / h, 3),
+            "w": round(100.0 * max(1.0, d.bbox_x2 - d.bbox_x1) / w, 3),
+            "h": round(100.0 * max(1.0, d.bbox_y2 - d.bbox_y1) / h, 3),
+            "conf": d.confidence,
+            "class": _map_class(d.object_class),
+            "track_id": d.track_id,
+            "color": d.dominant_color,
+            "detection_id": d.id,
+        })
+        if len(points) >= limit:
+            break
+    return {"video_id": video_id, "width": w, "height": h, "points": points}
 
 
 @router.post("/cases/{case_id}/videos/{video_id}")
@@ -441,6 +918,7 @@ def create_annotation(body: AnnotationCreate, db: Session = Depends(get_db), use
         author_id=user.id,
         body=body.body,
         flag=body.flag,
+        tags=body.tags,
     )
     db.add(row)
     db.commit()
@@ -657,15 +1135,45 @@ def faceted_search(
 # ── False positives / confidence ──────────────────────────────────────────────
 
 @router.post("/detections/{detection_id}/false-positive")
-def flag_false_positive(detection_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+def flag_false_positive(
+    detection_id: int,
+    reason: Optional[str] = None,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
     d = db.query(Detection).filter(Detection.id == detection_id).first()
     if not d:
         raise HTTPException(404)
     d.is_false_positive = True
+    d.false_positive_reason = reason
     db.add(d)
     db.commit()
-    log_action(db, action="detection.false_positive", user=user, resource_type="detection", resource_id=detection_id)
+    log_action(db, action="flag_false_positive", user=user, resource_type="detection", resource_id=detection_id, details={"reason": reason})
     return {"ok": True}
+
+
+@router.post("/videos/{video_id}/tracks/{track_id}/false-positive")
+def flag_track_false_positive(
+    video_id: int,
+    track_id: int,
+    reason: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    q = db.query(Detection).filter(Detection.video_id == video_id, Detection.track_id == track_id)
+    rows = q.all()
+    if not rows:
+        raise HTTPException(404, "No detections for track")
+    for d in rows:
+        d.is_false_positive = True
+        d.false_positive_reason = reason
+        db.add(d)
+    db.commit()
+    log_action(
+        db, action="flag_false_positive", user=user, resource_type="track",
+        resource_id=track_id, details={"video_id": video_id, "reason": reason, "count": len(rows)},
+    )
+    return {"ok": True, "flagged": len(rows)}
 
 
 # ── Batch upload ──────────────────────────────────────────────────────────────
@@ -728,7 +1236,7 @@ async def batch_upload(
 # ── Live RTSP registration ────────────────────────────────────────────────────
 
 @router.post("/cameras/{camera_id}/live")
-def enable_live(camera_id: int, rtsp_url: str = Form(...), db: Session = Depends(get_db), user: User = Depends(require_roles(UserRole.ADMIN))):
+def enable_live(camera_id: int, rtsp_url: str = Form(...), db: Session = Depends(get_db), user: User = Depends(require_roles(UserRole.ADMIN, UserRole.INVESTIGATOR))):
     cam = db.query(Camera).filter(Camera.id == camera_id).first()
     if not cam:
         raise HTTPException(404)
