@@ -1,4 +1,4 @@
-# Docker build context (Render / local)
+# Docker build context (Hugging Face Spaces / Render / local)
 .git
 .github
 **/__pycache__

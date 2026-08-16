@@ -1,3 +1,17 @@
+---
+title: AI Security Camera Investigator
+emoji: 📹
+colorFrom: green
+colorTo: gray
+sdk: docker
+app_port: 7860
+suggested_hardware: cpu-upgrade
+fullWidth: true
+pinned: false
+license: mit
+short_description: Upload CCTV footage and investigate with YOLO, tracking, and natural-language search.
+---
+
 # AI Security Camera Investigator
 
 An AI-powered surveillance video investigation platform that combines computer vision, object tracking, vector search, and natural language querying.
@@ -178,41 +192,45 @@ ai-security-investigator/
 └── docs/
 ```
 
-## Deploy on Render
+## Deploy on Hugging Face Spaces
 
-Production runs as **one Docker web service**: FastAPI + Next.js behind nginx, SQLite and uploads on a persistent disk at `/data`.
+This repo is Docker-Space ready (`sdk: docker`, port **7860**). The Space is [igad99/ai-security-investigator](https://huggingface.co/spaces/igad99/ai-security-investigator).
 
-1. Push this repo to GitHub (already connected at [Igadsme/ai-security-investigator](https://github.com/Igadsme/ai-security-investigator)).
-2. In [Render](https://dashboard.render.com) → **New** → **Blueprint** → select the repo. Render reads `render.yaml`.
-3. Confirm the **Standard** plan (2 GB). YOLO will OOM on Starter/Free (512 MB).
-4. Set `GEMINI_API_KEY` if you want Gemini search/summaries (optional; leave blank for rule-based parsing).
-5. Deploy. First build downloads Node, Python deps, and can take 10–20 minutes. Open `https://ai-security-investigator.onrender.com` (or the URL Render assigns) → Register → upload a short MP4.
+1. Space → **Settings → Variables and secrets**
+   - Secret `SECRET_KEY` — required (long random string)
+   - Secret `GEMINI_API_KEY` — optional (rule-based search works without it)
+   - Variable `ENABLE_VECTOR_SEARCH` = `false`
+   - Variable `FRAME_SAMPLE_RATE` = `5`
+2. Push this repo to the Space (from the project root):
 
-Manual setup (same result, no Blueprint):
+```bash
+git push space main
+```
 
-1. **New Web Service** → connect the GitHub repo → **Docker**
-2. Dockerfile path: `./Dockerfile`
-3. Health check path: `/api/health`
-4. Attach a **10 GB disk** mounted at `/data`
-5. Instance type: **Standard** or larger
-6. Set `SECRET_KEY` to a long random string (Blueprint generates this automatically)
+3. Wait for the Docker build (10–20+ minutes the first time). Status should go **Building** → **Running**.
+4. Open `https://igad99-ai-security-investigator.hf.space` → Register → upload a **short** MP4.
 
 Notes:
 
-- UI and API share one origin (`/api` is proxied)
-- Data lives on the disk (`app.db`, uploads, YOLO weights). Deploys without a disk wipe footage.
-- First video process downloads YOLO weights into `/data/models`
-- Use short clips on Standard; bump to Pro (4 GB) if processing OOMs
-- After Render is live, pause or delete the Hugging Face Space so it no longer auto-deploys from GitHub
+- UI and API share one origin (`/api` is proxied by nginx)
+- The container runs as UID **1000** (Hugging Face requirement)
+- SQLite and uploads live under `/data` (ephemeral unless you attach storage)
+- YOLO `yolov8n` weights are baked into the image
+- Free **CPU basic** often OOMs on long videos — use short clips or **CPU upgrade**
+- Do not commit sample `.jpg` assets; Spaces rejects some binary files
 
-Local production-like run:
+Local Space-like run:
 
 ```bash
 docker build -t asci .
-docker run --rm -p 10000:10000 -e SECRET_KEY=dev asci
+docker run --rm -p 7860:7860 -e SECRET_KEY=dev asci
 ```
 
-Then open http://localhost:10000.
+Then open http://localhost:7860.
+
+### Optional: Render
+
+Same Dockerfile. Render sets `$PORT` (usually 10000). Use `render.yaml` or a Docker web service with health check `/api/health` and a disk at `/data`. YOLO needs at least the Standard plan (2 GB).
 
 ## Testing
 

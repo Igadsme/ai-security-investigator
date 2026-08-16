@@ -1,6 +1,6 @@
 import axios from "axios";
 
-// Empty string = same-origin (Render nginx / reverse proxy).
+// Empty string = same-origin (Hugging Face / Render nginx reverse proxy).
 // Use ?? so "" is preserved; only null/undefined fall back to local API.
 const API_URL =
   process.env.NEXT_PUBLIC_API_URL !== undefined

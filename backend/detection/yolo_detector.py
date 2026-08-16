@@ -81,8 +81,13 @@ class YOLODetector:
     def __init__(self, model_path: Optional[str] = None):
         from ultralytics import YOLO
 
-        Path(settings.models_dir).mkdir(parents=True, exist_ok=True)
-        path = model_path or str(Path(settings.models_dir) / "yolov8n.pt")
+        try:
+            Path(settings.models_dir).mkdir(parents=True, exist_ok=True)
+        except OSError:
+            pass
+        baked = Path("/app/models/yolov8n.pt")
+        configured = Path(model_path) if model_path else Path(settings.models_dir) / "yolov8n.pt"
+        path = str(configured if configured.is_file() else baked if baked.is_file() else configured)
         self.model = YOLO(path)
         self.confidence = settings.confidence_threshold
 

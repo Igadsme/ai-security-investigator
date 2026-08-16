@@ -33,7 +33,11 @@ class Settings(BaseSettings):
 
     def ensure_dirs(self) -> None:
         for d in [self.upload_dir, self.processed_dir, self.models_dir, self.chroma_persist_dir]:
-            Path(d).mkdir(parents=True, exist_ok=True)
+            try:
+                Path(d).mkdir(parents=True, exist_ok=True)
+            except OSError:
+                # Hugging Face /data may be missing until runtime; start.sh creates it.
+                pass
 
 
 settings = Settings()

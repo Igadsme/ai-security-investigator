@@ -1,14 +1,22 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-PORT="${PORT:-10000}"
+# Hugging Face Spaces: app_port 7860, container UID 1000.
+# Render injects $PORT (usually 10000).
+PORT="${PORT:-7860}"
 
-mkdir -p /data/uploads /data/processed_videos /data/models /data/chroma_data /var/log/nginx
+export HOME="${HOME:-/home/user}"
+export YOLO_CONFIG_DIR="${YOLO_CONFIG_DIR:-/tmp/Ultralytics}"
+export TORCH_HOME="${TORCH_HOME:-/tmp/torch}"
+export MPLCONFIGDIR="${MPLCONFIGDIR:-/tmp/matplotlib}"
+
+mkdir -p /data/uploads /data/processed_videos /data/models /data/chroma_data \
+  "$YOLO_CONFIG_DIR" "$TORCH_HOME" "$MPLCONFIGDIR"
 
 export DATABASE_URL="${DATABASE_URL:-sqlite:////data/app.db}"
 export UPLOAD_DIR="${UPLOAD_DIR:-/data/uploads}"
 export PROCESSED_DIR="${PROCESSED_DIR:-/data/processed_videos}"
-export MODELS_DIR="${MODELS_DIR:-/data/models}"
+export MODELS_DIR="${MODELS_DIR:-/app/models}"
 export CHROMA_PERSIST_DIR="${CHROMA_PERSIST_DIR:-/data/chroma_data}"
 export ENABLE_VECTOR_SEARCH="${ENABLE_VECTOR_SEARCH:-false}"
 export USE_DEEPSORT="${USE_DEEPSORT:-false}"
@@ -17,7 +25,12 @@ export CORS_ORIGINS="${CORS_ORIGINS:-*}"
 export SECRET_KEY="${SECRET_KEY:-change-me}"
 export GEMINI_API_KEY="${GEMINI_API_KEY:-}"
 export GEMINI_MODEL="${GEMINI_MODEL:-gemini-2.5-flash}"
-export YOLO_CONFIG_DIR="${YOLO_CONFIG_DIR:-/data/models}"
+
+# Prefer baked YOLO weights; copy onto a persistent MODELS_DIR if requested.
+if [ ! -f "${MODELS_DIR}/yolov8n.pt" ] && [ -f /app/models/yolov8n.pt ]; then
+  mkdir -p "$MODELS_DIR"
+  cp /app/models/yolov8n.pt "${MODELS_DIR}/yolov8n.pt"
+fi
 
 echo "[asci] starting API on :8000"
 cd /app/backend
@@ -56,5 +69,6 @@ done
 
 sed "s/LISTEN_PORT/${PORT}/g" /app/deploy/nginx.conf.template > /tmp/nginx.conf
 
-echo "[asci] starting nginx on :${PORT}"
-nginx -c /tmp/nginx.conf -g 'daemon off;'
+echo "[asci] starting nginx on :${PORT} (uid=$(id -u))"
+# Full path: Hugging Face runs as UID 1000 and /usr/sbin may not be on PATH.
+/usr/sbin/nginx -c /tmp/nginx.conf -g 'daemon off;'
